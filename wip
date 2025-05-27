@@ -1,0 +1,52 @@
+#!/bin/tcsh -f
+
+${FREESURFER_HOME}/bin/recon-all \
+  -s ${subj} \
+  -base-init
+  -motioncor \
+  -talairach \
+  -talcheck \
+  -nuintensitycor \
+  -normalization \
+  -skullstrip \
+  -gcareg \
+  -canorm \
+  -careg \
+  -calabel \
+  -normalization2 \
+  -maskbfs \
+  -segmentation \
+  -fill \
+  -tessellate \
+  -smooth1 \
+  -inflate1 \
+  -qsphere \
+  -fix \
+  -autodetgwstats \
+  -white-preaparc \
+  -cortex-label \
+  -smooth2 \
+  -inflate2 \
+  -curvHK \
+  -sphere \
+  -surfreg \
+  -jacobian_white \
+  -avgcurv \
+  -cortparc \
+  -white \
+  -pial \
+  -curvstats \
+  -cortribbon \
+  -cortparc2 \
+  -cortparc3 \
+  -pctsurfcon \
+  -hyporelabel \
+  -aparc2aseg \
+  -apas2aseg \
+  -wmparc \
+  -parcstats \
+  -parcstats2 \
+  -parcstats3 \
+  -segstats \
+  -balabels
+

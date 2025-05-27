@@ -235,38 +235,55 @@ def plot_fig(vtx, fac, dat, rgb, outdir, mesh, meas, specs): # ================
         del p
         gc.collect()
         
-def makehtml(htmldir, sublist, surf, meas, specs): # =========================
+def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
     '''
     Make HTML file. Variables are as in the other functions.
     '''
     os.makedirs(os.path.join(htmldir), exist_ok=True)
     with open(os.path.join(htmldir,'{}_{}.html'.format(surf,meas)), 'w', encoding='utf-8') as f:
         f.write('<html><body bgcolor="#222222"><table>\n')
-        for sub in sublist:
-            shotsdir = os.path.relpath(os.path.join(subjdir, sub, 'after', 'shots'), start=htmldir)
+        for subj in subjlist:
+            shotsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'shots'), start=htmldir)
             f.write('<tr>')
             for view in specs['views']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
                     os.path.join(shotsdir, '{}_{}_{}.png'.format(surf, meas, view)),
                     os.path.join(shotsdir, 'thumbnails','{}_{}_{}.png'.format(surf, meas, view)),
-                    '{}, {}, {}, {}'.format(sub, surf, meas, view)))
+                    '{}, {}, {}, {}'.format(subj, surf, meas, view)))
             f.write('</tr>')
         f.write('</table></body></html>')
 
 ######## MAIN FUNCTION ########################################################
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Plot and save figures for each subject")
-    parser.add_argument("--sd", type=str, help="Subjects directory", required=True)
-    parser.add_argument("--hd", type=str, help="HTML directory", required=True)
-    args    = parser.parse_args()
-    subjdir = args.sd
-    htmldir = args.hd
     
+    # Argument parser
+    parser = argparse.ArgumentParser(description='Plot surface views for each subject, and makes an HTML page for visualization.')
+    parser.add_argument('--subj',    type=str, help='List of subjects separated by commas', required=False, default=None)
+    parser.add_argument('--subjdir', type=str, help='Subjects directory (usually SUBJECTS_DIR)', required=False, default=None)
+    parser.add_argument('--htmldir', type=str, help='HTML directory', required=False, default=None)
+    args    = parser.parse_args()
+    subjdir = args.subjdir
+    if args.subjdir is None or args.subjdir == '':
+        subjdir = os.getenv('SUBJECTS_DIR')
+    if subjdir == '' or subjdir is None:
+        raise ValueError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
+
+    # Make a list of subjects
+    if args.subj is None or args.subj == '':
+        tmp = glob.glob(subjdir + '/*')
+        subjlist = []
+        for t in tmp:
+            tpth, tnam = os.path.split(t)
+            if not tnam.startswith('fsaverage') and os.path.exists(os.path.join(t, 'scripts', 'recon-all.log')):
+                subjlist.append(tnam)
+    else:
+        subjlist = args.subj.split(',')
+        
     # Surfaces and measures to plot
     surflist = ['inflated','pial','white']
     measlist = ['aparc.annot', 'thickness', 'curv', 'sulc', 'jacobian_white', 'w-g.pct.mgh']
     
-    # Define color schemes
+    # Define locations, colors, and view schemes
     specs = {}
     specs['surf'] = {
         'orig.nofix':      {'dir': 'surf'},
@@ -299,37 +316,30 @@ if __name__ == "__main__":
         'bhant': {'elevation':   0, 'azimuth': 180},
         'bhpos': {'elevation':   0, 'azimuth':   0} }
 
-    # Make a list of subjects
-    tmp = glob.glob(subjdir + '/*')
-    sublist = []
-    for t in tmp:
-        tpth, tnam = os.path.split(t)
-        if not tnam.startswith('fsaverage') and os.path.exists(os.path.join(t, 'scripts', 'recon-all.log')):
-            sublist.append(tnam)
-    
     # For each subject, make all figures
-    for sub in sublist:
+    for subj in subjlist:
         
         # Where to save
-        outdir = os.path.join(subjdir, sub, 'after', 'shots')
+        outdir = os.path.join(subjdir, subj, 'after', 'shots')
         os.makedirs(os.path.join(outdir,'thumbnails'), exist_ok=True)
         
         # For each surface and measure
         for surf in surflist:
             for meas in measlist:
                 if os.path.exists(os.path.join(outdir,'thumbnails','{}_{}_{}.png'.format(surf, meas, 'bhpos'))):
-                    print('Skipping: {}, {}, {}'.format(sub, surf, meas))
+                    print('Skipping: {}, {}, {}'.format(subj, surf, meas))
                 else:
-                    print('Working on: {}, {}, {}'.format(sub, surf, meas))
+                    print('Working on: {}, {}, {}'.format(subj, surf, meas))
                     
                     # Load the data
-                    vtx, fac = load_surf(subjdir, sub, surf, specs)
-                    dat, rgb = load_data(subjdir, sub, meas, specs)
+                    vtx, fac = load_surf(subjdir, subj, surf, specs)
+                    dat, rgb = load_data(subjdir, subj, meas, specs)
                    
                     # Plot and save main fig and thumbnail
                     plot_fig(vtx, fac, dat, rgb, outdir, surf, meas, specs)
     
     # For each combination of surfaces and meshes, make an HTML file
-    for surf in surflist:
-        for meas in measlist:
-            makehtml(htmldir, sublist, surf, meas)
+    if args.htmldir is not None and args.htmldir != '':
+        for surf in surflist:
+            for meas in measlist:
+                makehtml(args.htmldir, subjlist, surf, meas, specs)

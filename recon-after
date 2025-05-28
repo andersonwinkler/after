@@ -1,0 +1,184 @@
+#!/bin/bash -f
+
+if [ -z "$1" ]; then
+cat <<EOU
+Retessellate surf/?h.orig, and then rerun recon-all from that point onwards.
+
+Usage:
+
+${0##*/} --subj <subject ID> [options]
+
+Options:
+
+--subj <subject ID>
+  Specify the subject ID. Must exist in the SUBJECTS_DIR directory.
+
+--sd <subjects directory>
+  Specify the subjects directory if not SUBJECTS_DIR.
+
+--overwrite
+  Overwrite previous outputs from recon-after.
+
+--progress
+  Show a progress bar when retessellating (use only if running from a terminal).
+
+--T2pial
+  Explicitly use T2pial option for recon-all, even if not originally used.
+  The T2 file must have been provided in the original call to recon-all.
+
+--FLAIRpial
+  The FLAIR file must have been provided in the original call to recon-all.
+
+Requirements:
+* FreeSurfer must be installed and configured properly.
+* The subject must have been processed with recon-all up to the point where
+  the surface registration is performed.
+* Either SUBJECTS_DIR must have been correctly set, or the option --sd must
+  be provided with the path to the directory that contains all subjects.
+
+_____________________________________
+Anderson M. Winkler
+University of Texas Rio Grande Valley
+May/2025
+https://brainder.org
+EOU
+exit 1
+fi
+
+# Some default variables, will be modified later
+OVERWRITE=false  # Overwrite previous outputs from recon-after?
+PROGRESS=""      # Show a progress bar when retessellating? (avoid using in the cluster)
+T2pial=false     # Do -T2pial?
+FLAIRpial=false  # Do -FLAIRpial?
+
+# Parse arguments
+while [[ ${#} -gt 0 ]] ; do
+  key="${1}"
+  case ${key} in
+    -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
+      subj="${2}"
+      shift 2
+      ;;
+    -sd|--sd)
+      SUBJECTS_DIR="${2}"
+      shift 2
+      ;;
+    -overwrite|--overwrite)
+      OVERWRITE=true
+      shift
+      ;;
+    -progress|--progress)
+      PROGRESS="--progress"
+      shift
+      ;;
+    -T2pial|--T2pial)
+      T2pial=true
+      shift
+      ;;
+    -FLAIRpial|--FLAIRpial)
+      FLAIRpial=true
+      shift
+      ;;
+    *)
+      echo "Unknown option: ${key}"
+      exit 1
+      ;;
+  esac
+done
+
+# Confirm that FS has run successfully up to this stage; if not, inform the user about the missing file
+FILELIST=(
+   ${SUBJECTS_DIR}/${subj}/mri/brain.finalsurfs.mgz
+   ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+   ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+   ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.lh.dat
+   ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.rh.dat
+   ${SUBJECTS_DIR}/${subj}/surf/lh.sphere.reg
+   ${SUBJECTS_DIR}/${subj}/surf/rh.sphere.reg 
+   ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log )
+MISSING=()
+for f in "${FILELIST[@]}" ; do
+   if [[! -f "${f}" ]] ; then
+      MISSING+=("${f}")
+   fi
+done
+if [[ ! -z ${MISSING} ]] ; then
+   echo "Error: Previous call to FreeSurfer did not run up to the stage needed to allow recon-after."
+   echo "Make sure all steps at least up to surface registration (up to -surfreg) have been executed successfully."
+   echo "The missing files are:"
+   for f in "${MISSING[@]}" ; do
+      echo "- ${f}"
+   done
+   exit 1
+fi
+
+# Check if this is a first run of if we are re-running
+if [[ -d ${SUBJECTS_DIR}/${subj}/surf ]] && [[ ! -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
+   echo "Making a backup copy of the original surfaces to ${SUBJECTS_DIR}/${subj}/surf.fs"
+   mkdir -p ${SUBJECTS_DIR}/${subj}/after/surf
+   cp -rp ${SUBJECTS_DIR}/${subj}/surf/* ${SUBJECTS_DIR}/${subj}/after/surf/
+   mv ${SUBJECTS_DIR}/${subj}/surf ${SUBJECTS_DIR}/${subj}/surf.fs
+   ln -s ../after/surf ${SUBJECTS_DIR}/${subj}/surf
+elif [[ -L ${SUBJECTS_DIR}/${subj}/surf ]] && [[ -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
+   if ${OVERWRITE} ; then
+      echo "Overwriting previous recon-after run based on the original ${SUBJECTS_DIR}/${subj}/surf.fs"
+      mkdir -p ${SUBJECTS_DIR}/${subj}/after/surf
+      cp -rp ${SUBJECTS_DIR}/${subj}/surf.fs/* ${SUBJECTS_DIR}/${subj}/after/surf/
+   else
+      echo "Error: Previous run already exists. If you want to overwrite, use --overwrite. Aborting."
+      exit 1
+   fi
+else
+      echo "Error: Files for ${SUBJECTS_DIR}/${subj} follow a non-standard structure. Aborting."
+      exit 1
+fi
+
+# If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
+if ! ${T2pial} ; then
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep T2pial|wc -l) -gt 0 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
+fi
+if ! ${FLAIRpial} ; then
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep FLAIRpial|wc -l) -gt 0 ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
+fi
+OPTS=""
+${T2pial}    && OPTS="OPTS -T2pial"
+${FLAIRpial} && OPTS="OPTS -FLAIRpial"
+
+# Now do the retessellation proper
+retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+
+# Redo recon-all, from the point in which ?h.orig is used
+${FREESURFER_HOME}/bin/recon-all \
+  -s "${subj}" \
+  -sd "${SUBJECTS_DIR}" \
+  -white-preaparc \
+  -cortex-label \
+  -smooth2 \
+  -inflate2 \
+  -curvHK \
+  -sphere \
+  -surfreg \
+  -jacobian_white \
+  -avgcurv \
+  -cortparc \
+  -white \
+  -pial \
+  -curvstats \
+  -cortribbon \
+  -cortparc2 \
+  -cortparc3 \
+  -pctsurfcon \
+  -hyporelabel \
+  -aparc2aseg \
+  -apas2aseg \
+  -wmparc \
+  -parcstats \
+  -parcstats2 \
+  -parcstats3 \
+  -segstats \
+  -balabels ${OPTS}
+

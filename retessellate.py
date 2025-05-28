@@ -76,15 +76,42 @@ def update_progress(current, total, start_time=None, bar_length=40, prefix='Prog
 if __name__ == '__main__':
 
     # Argument parser
-    parser = argparse.ArgumentParser(description='Retessellate surfaces.')
-    parser.add_argument('--subj',     type=str, help='List of subjects separated by commas',                  required=False, default=None)
-    parser.add_argument('--subjdir',  type=str, help='Subjects directory (usually SUBJECTS_DIR)',             required=False, default=None)
-    parser.add_argument('--srcsph',   type=str, help='Source sphere (typically subj/surf/?h.sphere.reg)',      required=False, default=None)
-    parser.add_argument('--trgsph',   type=str, help='Target sphere (typically fsaverage/surf/?h.sphere.reg)', required=False, default=None)
-    parser.add_argument('--srcsrf',   type=str, help='Source surface (typically subj/surf/?h.white)',          required=False, default=None)
-    parser.add_argument('--trgsrf',   type=str, help='Target surface (typically subj/after/?h.white.retess), to be created',  required=False, default=None)
-    parser.add_argument('--progress', action='store_true', help='Show a progress bar',  required=False, default=False)
-    args    = parser.parse_args()
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Retessellate surfaces to a common grid. ' + \
+                        'Invoke either with --subj (and optionally --subjdir and --srf)' + \
+                        'or with --srfsph, --trgsph, --srcsrf, and --trgsrf.' + \
+                        'In the latter case, the paths to the files must be specified.',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
+    # Options to call specifying a subject
+    parser.add_argument('--subj',
+                        help='List of subjects separated by commas',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subjdir',
+                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--srf',
+                        help='Surface to retessellate, if invoked with "--subj" (default: orig)',
+                        type=str, required=False, default='orig')
+    # Options to call with specific files
+    parser.add_argument('--srcsph',
+                        help='Source sphere (typically subj/surf/?h.sphere.reg)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--trgsph',
+                        help='Target sphere (typically fsaverage/surf/?h.sphere.reg)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--srcsrf',
+                        help='Source surface (typically subj/surf/?h.white)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--trgsrf',
+                        help='Target surface (typically subj/after/?h.white.retess), to be created',
+                        type=str, required=False, default=None)
+    # Show a nice progress bar (only use in interactive sessions)
+    parser.add_argument('--progress',
+                        help='Show a progress bar',
+                        action='store_true', required=False, default=False)
+    args = parser.parse_args()
     
     # Confirm whether we are using a default FS subject structure, or isolated, custom files
     customargs = [args.srcsph, args.trgsph, args.srcsrf, args.trgsrf]
@@ -127,10 +154,11 @@ if __name__ == '__main__':
                 path3 = args.srcsrf
                 path4 = args.trgsrf
             else:
+                os.makedirs(os.path.join(subjdir, subj, 'after', 'surf'), exist_ok=True)
                 path1 = os.path.join(subjdir, subj, 'surf',  '{}.sphere.reg'.format(h))
                 path2 = os.path.join(fsavgdir,      'surf',  '{}.sphere.reg'.format(h))
-                path3 = os.path.join(subjdir, subj, 'surf',  '{}.white'.format(h))
-                path4 = os.path.join(subjdir, subj, 'after', '{}.white.retess'.format(h))
+                path3 = os.path.join(subjdir, subj, 'surf',  '{}.{}'.format(h, args.srf))
+                path4 = os.path.join(subjdir, subj, 'after', 'surf', '{}.{}'.format(h, args.srf))
             print('Retessellating {}'.format(path3))
             
             # Default margin

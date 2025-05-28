@@ -1,0 +1,128 @@
+{
+  "surf": {
+    "orig.nofix": {
+      "dir": "surf"
+    },
+    "smoothwm.nofix": {
+      "dir": "surf"
+    },
+    "inflated.nofix": {
+      "dir": "surf"
+    },
+    "qsphere.nofix": {
+      "dir": "surf"
+    },
+    "orig": {
+      "dir": "surf"
+    },
+    "inflated": {
+      "dir": "surf"
+    },
+    "white": {
+      "dir": "surf"
+    },
+    "smoothwm": {
+      "dir": "surf"
+    },
+    "sphere": {
+      "dir": "surf"
+    },
+    "sphere.reg": {
+      "dir": "surf"
+    },
+    "pial": {
+      "dir": "surf"
+    }
+  },
+  "meas": {
+    "curv": {
+      "dir": "surf",
+      "cmap": "bwr",
+      "clim": [
+        -0.5,
+        0.5
+      ]
+    },
+    "sulc": {
+      "dir": "surf",
+      "cmap": "bwr",
+      "clim": [
+        -12,
+        12
+      ]
+    },
+    "jacobian_white": {
+      "dir": "surf",
+      "cmap": "plasma",
+      "clim": [
+        0.4,
+        2.5
+      ]
+    },
+    "thickness": {
+      "dir": "surf",
+      "cmap": "plasma",
+      "clim": [
+        1,
+        4.5
+      ]
+    },
+    "w-g.pct.mgh": {
+      "dir": "surf",
+      "cmap": "plasma",
+      "clim": [
+        0,
+        40
+      ]
+    },
+    "aparc.annot": {
+      "dir": "label",
+      "cmap": null,
+      "clim": null
+    },
+    "aparc.a2009s.annot": {
+      "dir": "label",
+      "cmap": null,
+      "clim": null
+    },
+    "aparc.DKTatlas.annot": {
+      "dir": "label",
+      "cmap": null,
+      "clim": null
+    }
+  },
+  "views": {
+    "lhlat": {
+      "elevation": 0,
+      "azimuth": -90
+    },
+    "lhmed": {
+      "elevation": 0,
+      "azimuth": 90
+    },
+    "rhlat": {
+      "elevation": 0,
+      "azimuth": 90
+    },
+    "rhmed": {
+      "elevation": 0,
+      "azimuth": -90
+    },
+    "bhsup": {
+      "elevation": 90,
+      "azimuth": 0
+    },
+    "bhinf": {
+      "elevation": -90,
+      "azimuth": 180
+    },
+    "bhant": {
+      "elevation": 0,
+      "azimuth": 180
+    },
+    "bhpos": {
+      "elevation": 0,
+      "azimuth": 0
+    }
+  }
+}

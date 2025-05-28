@@ -14,8 +14,9 @@ import pyvista as pv
 import matplotlib.colors as mcolors
 from PIL import Image
 import gc
+import json
 
-def load_surf(subjdir, sub, surf, specs): # ===================================
+def load_surf(subjdir, sub, surf, specs=None): # ==============================
     '''
     Load surface for left and right hemis, and concatenate them too
 
@@ -28,6 +29,8 @@ def load_surf(subjdir, sub, surf, specs): # ===================================
     surf : str
         Name of a FreeSurfer surface, e.g., white, pial, inflated, sphere, sphere.reg, etc.
         or a path to that surface (filename must start with lh or rh)
+    specs : dict
+        Optional dict with a subdict under 'surf' from which some info is obtained.
 
     Returns
     -------
@@ -82,7 +85,7 @@ def load_surf(subjdir, sub, surf, specs): # ===================================
         fac[h] = np.hstack((3*np.ones((fac[h].shape[0],1)).astype(int),fac[h]))
     return vtx, fac
 
-def load_data(subjdir, sub, meas, specs): # ===================================
+def load_data(subjdir, sub, meas, specs=None): # ==============================
     '''
     Load overlay measure
 
@@ -95,7 +98,7 @@ def load_data(subjdir, sub, meas, specs): # ===================================
     meas : str
         Overlay measure, e.g., thichness, sulc, curv, etc.
     specs: dict
-        A dictionary with a subdict under 'meas' from which some info is obtained.
+        Optional dict with a subdict under 'meas' from which some info is obtained.
         
     Returns
     -------
@@ -253,14 +256,37 @@ def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
             f.write('</tr>')
         f.write('</table></body></html>')
 
+
+def readjson(jsonfile): # =====================================================
+    '''
+    Read a json file to dict.
+    '''
+    with open(jsonfile, 'r') as fp:
+        J = json.load(fp)
+    return J
+
+def writejson(J, jsonfile): # =================================================
+    '''
+    Write a dict to json file.
+    '''
+    with open(jsonfile, 'w') as fp:
+        json.dump(J, fp, indent=2)
+    return
+
 ######## MAIN FUNCTION ########################################################
 if __name__ == "__main__":
     
     # Argument parser
     parser = argparse.ArgumentParser(description='Plot surface views for each subject, and makes an HTML page for visualization.')
-    parser.add_argument('--subj',    type=str, help='List of subjects separated by commas', required=False, default=None)
-    parser.add_argument('--subjdir', type=str, help='Subjects directory (usually SUBJECTS_DIR)', required=False, default=None)
-    parser.add_argument('--htmldir', type=str, help='HTML directory', required=False, default=None)
+    parser.add_argument('--subj',
+                        help='List of subjects separated by commas',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subjdir',
+                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--htmldir',
+                        help='HTML directory',
+                        type=str, required=False, default=None)
     args    = parser.parse_args()
     subjdir = args.subjdir
     if args.subjdir is None or args.subjdir == '':
@@ -283,38 +309,8 @@ if __name__ == "__main__":
     surflist = ['inflated','pial','white']
     measlist = ['aparc.annot', 'thickness', 'curv', 'sulc', 'jacobian_white', 'w-g.pct.mgh']
     
-    # Define locations, colors, and view schemes
-    specs = {}
-    specs['surf'] = {
-        'orig.nofix':      {'dir': 'surf'},
-        'smoothwm.nofix':  {'dir': 'surf'},
-        'inflated.nofix':  {'dir': 'surf'},
-        'qsphere.nofix':   {'dir': 'surf'},
-        'orig':            {'dir': 'surf'},
-        'inflated':        {'dir': 'surf'},
-        'white':           {'dir': 'surf'},
-        'smoothwm':        {'dir': 'surf'},
-        'sphere':          {'dir': 'surf'},
-        'sphere.reg':      {'dir': 'surf'},
-        'pial':            {'dir': 'surf'} }
-    specs['meas'] = {
-        'curv':                 {'dir': 'surf', 'cmap': 'bwr',    'clim': [-.5, .5]},
-        'sulc':                 {'dir': 'surf', 'cmap': 'bwr',    'clim': [-12, 12]},
-        'jacobian_white':       {'dir': 'surf', 'cmap': 'plasma', 'clim': [0, 2.5]},
-        'thickness':            {'dir': 'surf', 'cmap': 'plasma', 'clim': [1, 5]},
-        'w-g.pct.mgh':          {'dir': 'surf', 'cmap': 'plasma', 'clim': [0, 40]},
-        'aparc.annot':          {'dir': 'label', 'cmap': None,    'clim': None},
-        'aparc.a2009s.annot':   {'dir': 'label', 'cmap': None,    'clim': None},
-        'aparc.DKTatlas.annot': {'dir': 'label', 'cmap': None,    'clim': None} }
-    specs['views'] = {
-        'lhlat': {'elevation':   0, 'azimuth': -90},
-        'lhmed': {'elevation':   0, 'azimuth':  90},
-        'rhlat': {'elevation':   0, 'azimuth':  90},
-        'rhmed': {'elevation':   0, 'azimuth': -90},
-        'bhsup': {'elevation':  90, 'azimuth':   0},
-        'bhinf': {'elevation': -90, 'azimuth': 180},
-        'bhant': {'elevation':   0, 'azimuth': 180},
-        'bhpos': {'elevation':   0, 'azimuth':   0} }
+    # Load locations, colors, and view schemes from a fileS
+    specs = readjson(os.path.join(os.path.dirname(__file__), 'etc', 'takeshots.json'))
 
     # For each subject, make all figures
     for subj in subjlist:
@@ -327,7 +323,11 @@ if __name__ == "__main__":
         for surf in surflist:
             for meas in measlist:
                 if os.path.exists(os.path.join(outdir,'thumbnails','{}_{}_{}.png'.format(surf, meas, 'bhpos'))):
-                    print('Skipping: {}, {}, {}'.format(subj, surf, meas))
+                    print('Skipping: {}, {}, {} (already done)'.format(subj, surf, meas))
+                elif not os.path.exists(os.path.join(subjdir, subj, specs['surf'][surf]['dir'], 'rh.{}'.format(surf))):
+                    print('Skipping: {}, {}, {} (missing {})'.format(subj, surf, meas, surf))
+                elif not os.path.exists(os.path.join(subjdir, subj, specs['meas'][meas]['dir'], 'rh.{}'.format(meas))):
+                    print('Skipping: {}, {}, {} (missing {})'.format(subj, surf, meas, meas))
                 else:
                     print('Working on: {}, {}, {}'.format(subj, surf, meas))
                     

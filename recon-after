@@ -32,7 +32,7 @@ Options:
 Requirements:
 * FreeSurfer must be installed and configured properly.
 * The subject must have been processed with recon-all up to the point where
-  the surface registration is performed.
+  the surface registration is performed (?h.sphere.reg must exist).
 * Either SUBJECTS_DIR must have been correctly set, or the option --sd must
   be provided with the path to the directory that contains all subjects.
 
@@ -113,25 +113,34 @@ if [[ ! -z ${MISSING} ]] ; then
 fi
 
 # Check if this is a first run of if we are re-running
-if [[ -d ${SUBJECTS_DIR}/${subj}/surf ]] && [[ ! -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
-   echo "Making a backup copy of the original surfaces to ${SUBJECTS_DIR}/${subj}/surf.fs"
-   mkdir -p ${SUBJECTS_DIR}/${subj}/after/surf
-   cp -rp ${SUBJECTS_DIR}/${subj}/surf/* ${SUBJECTS_DIR}/${subj}/after/surf/
-   mv ${SUBJECTS_DIR}/${subj}/surf ${SUBJECTS_DIR}/${subj}/surf.fs
-   ln -s ../after/surf ${SUBJECTS_DIR}/${subj}/surf
-elif [[ -L ${SUBJECTS_DIR}/${subj}/surf ]] && [[ -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
+if [[ -d ${SUBJECTS_DIR}/${subj}/mri  ]] && [[ ! -e ${SUBJECTS_DIR}/${subj}/mri.fs  ]] && \
+   [[ -d ${SUBJECTS_DIR}/${subj}/surf ]] && [[ ! -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
+   for dir in mri surf ; do
+      echo "Copying: ${SUBJECTS_DIR}/${subj}/${dir}/* -> ${SUBJECTS_DIR}/${subj}/after/${dir}/"
+      mkdir -p ${SUBJECTS_DIR}/${subj}/after/${dir}
+      cp -rp ${SUBJECTS_DIR}/${subj}/${dir}/* ${SUBJECTS_DIR}/${subj}/after/${dir}/
+      echo "Moving: ${SUBJECTS_DIR}/${subj}/${dir} -> ${SUBJECTS_DIR}/${subj}/${dir}.fs"
+      mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/${dir}.fs
+      echo "Making symlink: ${SUBJECTS_DIR}/${subj}/${dir} -> ${SUBJECTS_DIR}/${subj}/after/${dir}"
+      ln -s ../after/${dir} ${SUBJECTS_DIR}/${subj}/${dir}
+   done
+elif [[ -L ${SUBJECTS_DIR}/${subj}/mri  ]] && [[ -e ${SUBJECTS_DIR}/${subj}/mri.fs  ]] && \
+     [[ -L ${SUBJECTS_DIR}/${subj}/surf ]] && [[ -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
    if ${OVERWRITE} ; then
-      echo "Overwriting previous recon-after run based on the original ${SUBJECTS_DIR}/${subj}/surf.fs"
-      mkdir -p ${SUBJECTS_DIR}/${subj}/after/surf
-      cp -rp ${SUBJECTS_DIR}/${subj}/surf.fs/* ${SUBJECTS_DIR}/${subj}/after/surf/
+      for dir in mri surf ; do
+         echo "Overwriting: ${SUBJECTS_DIR}/${subj}/${dir}.fs/* -> ${SUBJECTS_DIR}/${subj}/after/${dir}/"
+         mkdir -p ${SUBJECTS_DIR}/${subj}/after/${dir} # In case the link is broken
+         cp -rp ${SUBJECTS_DIR}/${subj}/${dir}.fs/* ${SUBJECTS_DIR}/${subj}/after/${dir}/
+      done
    else
       echo "Error: Previous run already exists. If you want to overwrite, use --overwrite. Aborting."
       exit 1
    fi
 else
-      echo "Error: Files for ${SUBJECTS_DIR}/${subj} follow a non-standard structure. Aborting."
-      exit 1
+   echo "Error: Files for ${SUBJECTS_DIR}/${subj} follow a non-standard structure. Aborting."
+   exit 1
 fi
+done
 
 # If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
 if ! ${T2pial} ; then
@@ -145,8 +154,8 @@ if ! ${FLAIRpial} ; then
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
 fi
 OPTS=""
-${T2pial}    && OPTS="OPTS -T2pial"
-${FLAIRpial} && OPTS="OPTS -FLAIRpial"
+${T2pial}    && OPTS="${OPTS} -T2pial"
+${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
 
 # Now do the retessellation proper
 retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}

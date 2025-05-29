@@ -279,7 +279,11 @@ if __name__ == "__main__":
     #pv.start_xvfb()
     
     # Argument parser
-    parser = argparse.ArgumentParser(description='Plot surface views for each subject, and makes an HTML page for visualization.')
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Plot surface views for each subject, and makes an HTML page for visualization.',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
     parser.add_argument('--subj',
                         help='List of subjects separated by commas',
                         type=str, required=False, default=None)

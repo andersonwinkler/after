@@ -247,13 +247,13 @@ def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
         f.write('<html><body bgcolor="#222222"><table>\n')
         for subj in subjlist:
             shotsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'shots'), start=htmldir)
-            f.write('<tr>')
+            f.write('<tr>\n')
             for view in specs['views']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
                     os.path.join(shotsdir, '{}_{}_{}.png'.format(surf, meas, view)),
                     os.path.join(shotsdir, 'thumbnails','{}_{}_{}.png'.format(surf, meas, view)),
                     '{}, {}, {}, {}'.format(subj, surf, meas, view)))
-            f.write('</tr>')
+            f.write('</tr>\n')
         f.write('</table></body></html>')
 
 
@@ -275,6 +275,8 @@ def writejson(J, jsonfile): # =================================================
 
 ######## MAIN FUNCTION ########################################################
 if __name__ == "__main__":
+    # For headless display (slower)
+    #pv.start_xvfb()
     
     # Argument parser
     parser = argparse.ArgumentParser(description='Plot surface views for each subject, and makes an HTML page for visualization.')
@@ -296,7 +298,7 @@ if __name__ == "__main__":
 
     # Make a list of subjects
     if args.subj is None or args.subj == '':
-        tmp = glob.glob(subjdir + '/*')
+        tmp = sorted(glob.glob(subjdir + '/*'))
         subjlist = []
         for t in tmp:
             tpth, tnam = os.path.split(t)

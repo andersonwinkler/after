@@ -1,4 +1,4 @@
-#!/bin/bash -f
+#!/bin/bash
 
 if [ -z "$1" ]; then
 cat <<EOU
@@ -98,7 +98,7 @@ FILELIST=(
    ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log )
 MISSING=()
 for f in "${FILELIST[@]}" ; do
-   if [[! -f "${f}" ]] ; then
+   if [[ ! -f "${f}" ]] ; then
       MISSING+=("${f}")
    fi
 done
@@ -112,58 +112,43 @@ if [[ ! -z ${MISSING} ]] ; then
    exit 1
 fi
 
-# Check if this is a first run of if we are re-running
-if [[ -d ${SUBJECTS_DIR}/${subj}/mri  ]] && [[ ! -e ${SUBJECTS_DIR}/${subj}/mri.fs  ]] && \
-   [[ -d ${SUBJECTS_DIR}/${subj}/surf ]] && [[ ! -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
-   for dir in mri surf ; do
-      echo "Copying: ${SUBJECTS_DIR}/${subj}/${dir}/* -> ${SUBJECTS_DIR}/${subj}/after/${dir}/"
-      mkdir -p ${SUBJECTS_DIR}/${subj}/after/${dir}
-      cp -rp ${SUBJECTS_DIR}/${subj}/${dir}/* ${SUBJECTS_DIR}/${subj}/after/${dir}/
-      echo "Moving: ${SUBJECTS_DIR}/${subj}/${dir} -> ${SUBJECTS_DIR}/${subj}/${dir}.fs"
-      mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/${dir}.fs
-      echo "Making symlink: ${SUBJECTS_DIR}/${subj}/${dir} -> ${SUBJECTS_DIR}/${subj}/after/${dir}"
-      ln -s ../after/${dir} ${SUBJECTS_DIR}/${subj}/${dir}
+# If this is the first run, move to a safe place, than bring back by copying
+echo "Moving previous FS directory for ${subj} to ${SUBJECTS_DIR}/${subj}/fs.original"
+if [[ ! -e ${SUBJECTS_DIR}/${subj}/fs.original ]] ; then
+   mkdir -p ${SUBJECTS_DIR}/${subj}/fs.original
+   for dir in label mri scripts stats surf tmp touch trash ; do
+     mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/fs.original
    done
-elif [[ -L ${SUBJECTS_DIR}/${subj}/mri  ]] && [[ -e ${SUBJECTS_DIR}/${subj}/mri.fs  ]] && \
-     [[ -L ${SUBJECTS_DIR}/${subj}/surf ]] && [[ -e ${SUBJECTS_DIR}/${subj}/surf.fs ]] ; then
-   if ${OVERWRITE} ; then
-      for dir in mri surf ; do
-         echo "Overwriting: ${SUBJECTS_DIR}/${subj}/${dir}.fs/* -> ${SUBJECTS_DIR}/${subj}/after/${dir}/"
-         mkdir -p ${SUBJECTS_DIR}/${subj}/after/${dir} # In case the link is broken
-         cp -rp ${SUBJECTS_DIR}/${subj}/${dir}.fs/* ${SUBJECTS_DIR}/${subj}/after/${dir}/
-      done
-   else
-      echo "Error: Previous run already exists. If you want to overwrite, use --overwrite. Aborting."
-      exit 1
-   fi
-else
-   echo "Error: Files for ${SUBJECTS_DIR}/${subj} follow a non-standard structure. Aborting."
-   exit 1
 fi
+echo "Making copies from the original; we will work on the copies"
+for dir in label mri scripts stats surf tmp touch trash ; do
+   echo "- Copying ${SUBJECTS_DIR}/${subj}/fs.original/${dir} -> ${SUBJECTS_DIR}/${subj}/"
+   rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
+   cp -rp ${SUBJECTS_DIR}/${subj}/fs.original/${dir} ${SUBJECTS_DIR}/${subj}/
 done
 
-# If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
-if ! ${T2pial} ; then
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep T2pial|wc -l) -gt 0 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
-fi
-if ! ${FLAIRpial} ; then
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep FLAIRpial|wc -l) -gt 0 ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
-fi
-OPTS=""
-${T2pial}    && OPTS="${OPTS} -T2pial"
-${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
-
 # Now do the retessellation proper
-retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+$(dirname "$(readlink -f "${0}")")/retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+
+# Replace the previous ?h.orig.premesh and ?h.orig for the retessellated
+if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
+   [[ -f ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
+   mv   ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess  ${SUBJECTS_DIR}/${subj}/surf/lh.orig.premesh
+   mv   ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess  ${SUBJECTS_DIR}/${subj}/surf/rh.orig.premesh
+   cp -p ${SUBJECTS_DIR}/${subj}/surf/lh.orig.premesh ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+   cp -p ${SUBJECTS_DIR}/${subj}/surf/rh.orig.premesh ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+else
+   echo "Retessellation failed. Expected output files were not both produced:"
+   echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
+   echo "- ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess"
+   exit 1
+fi
 
 # Redo recon-all, from the point in which ?h.orig is used
 ${FREESURFER_HOME}/bin/recon-all \
   -s "${subj}" \
   -sd "${SUBJECTS_DIR}" \
+  -autodetgwstats \
   -white-preaparc \
   -cortex-label \
   -smooth2 \
@@ -189,5 +174,23 @@ ${FREESURFER_HOME}/bin/recon-all \
   -parcstats2 \
   -parcstats3 \
   -segstats \
-  -balabels ${OPTS}
+  -balabels
 
+# If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
+if ! ${T2pial} ; then
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
+fi
+if ! ${FLAIRpial} ; then
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
+fi
+OPTS=""
+${T2pial}    && OPTS="${OPTS} -T2pial"
+${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+
+if ${T2pial} || ${FLAIRpial} ; then
+   echo ${FREESURFER_HOME}/bin/recon-all -s "${subj}" -sd "${SUBJECTS_DIR}" ${OPTS} NOT DONE
+fi

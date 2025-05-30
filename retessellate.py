@@ -154,11 +154,11 @@ if __name__ == '__main__':
                 path3 = args.srcsrf
                 path4 = args.trgsrf
             else:
-                os.makedirs(os.path.join(subjdir, subj, 'after', 'surf'), exist_ok=True)
+                os.makedirs(os.path.join(subjdir, subj, 'after'), exist_ok=True)
                 path1 = os.path.join(subjdir, subj, 'surf',  '{}.sphere.reg'.format(h))
                 path2 = os.path.join(fsavgdir,      'surf',  '{}.sphere.reg'.format(h))
                 path3 = os.path.join(subjdir, subj, 'surf',  '{}.{}'.format(h, args.srf))
-                path4 = os.path.join(subjdir, subj, 'after', 'surf', '{}.{}'.format(h, args.srf))
+                path4 = os.path.join(subjdir, subj, 'after', '{}.{}.retess'.format(h, args.srf))
             print('Retessellating {}'.format(path3))
             
             # Default margin

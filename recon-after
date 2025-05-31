@@ -16,18 +16,25 @@ Options:
 --sd <subjects directory>
   Specify the subjects directory if not SUBJECTS_DIR.
 
---overwrite
-  Overwrite previous outputs from recon-after.
-
---progress
-  Show a progress bar when retessellating (use only if running from a terminal).
-
 --T2pial
   Explicitly use T2pial option for recon-all, even if not originally used.
   The T2 file must have been provided in the original call to recon-all.
 
 --FLAIRpial
   The FLAIR file must have been provided in the original call to recon-all.
+
+--revert
+  Revert from the last backup if it exists thus deleting current results.
+
+--nobackup
+  Do not backup original outputs from recon-all, such that ${0##*/} will
+  overwrite those outputs. Cannot be reversed; if a failure occurs, it will
+  be necessary to run recon-all from scratch. Use only if you don't mind
+  risking losing data or have limited storage space.
+
+--progress
+  Show a progress bar when retessellating. Avoid if running in a
+  cluster or headless system, but encouraged in interactive sessions.
 
 Requirements:
 * FreeSurfer must be installed and configured properly.
@@ -46,10 +53,11 @@ exit 1
 fi
 
 # Some default variables, will be modified later
-OVERWRITE=false  # Overwrite previous outputs from recon-after?
-PROGRESS=""      # Show a progress bar when retessellating? (avoid using in the cluster)
 T2pial=false     # Do -T2pial?
 FLAIRpial=false  # Do -FLAIRpial?
+NOBACKUP=false   # Do not backup, just overwrite existing files
+REVERT=false     # Revert from the backup
+PROGRESS=""      # Show a progress bar when retessellating? (avoid using in the cluster)
 
 # Parse arguments
 while [[ ${#} -gt 0 ]] ; do
@@ -63,20 +71,24 @@ while [[ ${#} -gt 0 ]] ; do
       SUBJECTS_DIR="${2}"
       shift 2
       ;;
-    -overwrite|--overwrite)
-      OVERWRITE=true
-      shift
-      ;;
-    -progress|--progress)
-      PROGRESS="--progress"
-      shift
-      ;;
     -T2pial|--T2pial)
       T2pial=true
       shift
       ;;
     -FLAIRpial|--FLAIRpial)
       FLAIRpial=true
+      shift
+      ;;
+    -revert|--revert)
+      REVERT=true
+      shift
+      ;;
+    -nobackup|--nobackup)
+      NOBACKUP=true
+      shift
+      ;;
+    -progress|--progress)
+      PROGRESS="--progress"
       shift
       ;;
     *)
@@ -86,6 +98,40 @@ while [[ ${#} -gt 0 ]] ; do
   esac
 done
 
+# Argument checking
+if ${REVERT} && ! ${NOBACKUP} ; then
+   echo "Error: Cannot use --revert and --nobackup together."
+   exit 1
+fi
+
+# Revert from the backup and exit
+if ${REVERT} ; then
+   ALLGOOD=true
+   for dir in label mri scripts stats surf tmp touch trash ; do
+      [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
+   done
+   if ${ALLGOOD} ; then
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
+         rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
+         echo "- Reverting ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} -> ${SUBJECTS_DIR}/${subj}"
+         mv ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
+      done
+      echo "- Removing ${SUBJECTS_DIR}/${subj}/${dir} if empty as it should"
+      rmdir ${SUBJECTS_DIR}/${subj}/fs.bak
+      exit 0
+   else
+      echo "Error: Backup in ${SUBJECTS_DIR}/${subj}/fs.bak appears incomplete. Cannot revert automatically. Aborting."
+      exit 1
+   fi
+fi
+
+# Confirm we have FreeSurfer available
+if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
+   echo "Error: FreeSurfer not correctly configured. Aborting."
+   exit 1
+fi
+
 # Confirm that FS has run successfully up to this stage; if not, inform the user about the missing file
 FILELIST=(
    ${SUBJECTS_DIR}/${subj}/mri/brain.finalsurfs.mgz
@@ -94,8 +140,7 @@ FILELIST=(
    ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.lh.dat
    ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.rh.dat
    ${SUBJECTS_DIR}/${subj}/surf/lh.sphere.reg
-   ${SUBJECTS_DIR}/${subj}/surf/rh.sphere.reg 
-   ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log )
+   ${SUBJECTS_DIR}/${subj}/surf/rh.sphere.reg )
 MISSING=()
 for f in "${FILELIST[@]}" ; do
    if [[ ! -f "${f}" ]] ; then
@@ -103,7 +148,7 @@ for f in "${FILELIST[@]}" ; do
    fi
 done
 if [[ ! -z ${MISSING} ]] ; then
-   echo "Error: Previous call to FreeSurfer did not run up to the stage needed to allow recon-after."
+   echo "Error: Previous call to FreeSurfer did not run up to the stage needed to allow ${0##*/}."
    echo "Make sure all steps at least up to surface registration (up to -surfreg) have been executed successfully."
    echo "The missing files are:"
    for f in "${MISSING[@]}" ; do
@@ -112,43 +157,74 @@ if [[ ! -z ${MISSING} ]] ; then
    exit 1
 fi
 
-# If this is the first run, move to a safe place, than bring back by copying
-echo "Moving previous FS directory for ${subj} to ${SUBJECTS_DIR}/${subj}/fs.original"
-if [[ ! -e ${SUBJECTS_DIR}/${subj}/fs.original ]] ; then
-   mkdir -p ${SUBJECTS_DIR}/${subj}/fs.original
+# If this is the first run, move to a safe place, than bring back by copying, otherwise adapt accordingly
+if ${NOBACKUP} ; then
+   echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
+else
+   if [[ -e ${SUBJECTS_DIR}/${subj}/fs.bak ]] ; then
+      echo "Error: A backup already exists in ${SUBJECTS_DIR}/${subj}/fs.bak."
+      echo "To be able to run ${0##*/}, you need to remove or rename that backup. Aborting."
+      exit 1
+   else
+      echo "Moving previous FS outputs for ${subj} to ${SUBJECTS_DIR}/${subj}/fs.bak"
+      mkdir -p ${SUBJECTS_DIR}/${subj}/fs.bak
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/fs.bak/
+      done
+   fi
+   ALLGOOD=true
    for dir in label mri scripts stats surf tmp touch trash ; do
-     mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/fs.original
+      [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
    done
+   if ${ALLGOOD} ; then
+      echo "Making new copies from the backup; we will work on the copies; deleting previous copies if they exist."
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
+         rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
+         echo "- Copying ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} -> ${SUBJECTS_DIR}/${subj}/"
+         cp -rp ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
+      done
+   else
+      echo "Error: ${SUBJECTS_DIR}/${subj}/fs.bak does not contain all data needed. Aborting."
+      exit 1
+   fi
 fi
-echo "Making copies from the original; we will work on the copies"
-for dir in label mri scripts stats surf tmp touch trash ; do
-   echo "- Copying ${SUBJECTS_DIR}/${subj}/fs.original/${dir} -> ${SUBJECTS_DIR}/${subj}/"
-   rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
-   cp -rp ${SUBJECTS_DIR}/${subj}/fs.original/${dir} ${SUBJECTS_DIR}/${subj}/
-done
 
 # Now do the retessellation proper
+mkdir -p ${SUBJECTS_DIR}/${subj}/after
 $(dirname "$(readlink -f "${0}")")/retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
-# Replace the previous ?h.orig.premesh and ?h.orig for the retessellated
+# Replace the existing ?h.orig for the retessellated
 if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
    [[ -f ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
-   mv   ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess  ${SUBJECTS_DIR}/${subj}/surf/lh.orig.premesh
-   mv   ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess  ${SUBJECTS_DIR}/${subj}/surf/rh.orig.premesh
-   cp -p ${SUBJECTS_DIR}/${subj}/surf/lh.orig.premesh ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-   cp -p ${SUBJECTS_DIR}/${subj}/surf/rh.orig.premesh ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+   mv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+   mv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
 else
-   echo "Retessellation failed. Expected output files were not both produced:"
+   echo "Retessellation failed. The expected output files were not both produced:"
    echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
    echo "- ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess"
    exit 1
 fi
 
+# If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
+if ! ${T2pial} ; then
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
+fi
+if ! ${FLAIRpial} ; then
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
+fi
+OPTS=""
+${T2pial}    && OPTS="${OPTS} -T2pial"
+${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+
 # Redo recon-all, from the point in which ?h.orig is used
 ${FREESURFER_HOME}/bin/recon-all \
   -s "${subj}" \
   -sd "${SUBJECTS_DIR}" \
-  -autodetgwstats \
   -white-preaparc \
   -cortex-label \
   -smooth2 \
@@ -174,23 +250,6 @@ ${FREESURFER_HOME}/bin/recon-all \
   -parcstats2 \
   -parcstats3 \
   -segstats \
-  -balabels
+  -balabels ${OPTS}
 
-# If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
-if ! ${T2pial} ; then
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
-fi
-if ! ${FLAIRpial} ; then
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
-fi
-OPTS=""
-${T2pial}    && OPTS="${OPTS} -T2pial"
-${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
 
-if ${T2pial} || ${FLAIRpial} ; then
-   echo ${FREESURFER_HOME}/bin/recon-all -s "${subj}" -sd "${SUBJECTS_DIR}" ${OPTS} NOT DONE
-fi

@@ -113,18 +113,26 @@ if __name__ == '__main__':
                         action='store_true', required=False, default=False)
     args = parser.parse_args()
     
+    subj     = args.subj
+    subjdir  = args.subjdir
+    srf      = args.srf
+    srcsph   = args.srcsph
+    trgsph   = args.trgsph
+    srcsrf   = args.srcsrf
+    trgsrf   = args.trgsrf
+    progress = args.progress
+    
     # Confirm whether we are using a default FS subject structure, or isolated, custom files
-    customargs = [args.srcsph, args.trgsph, args.srcsrf, args.trgsrf]
-    if args.subj is None and None in customargs:
+    customargs = [srcsph, trgsph, srcsrf, trgsrf]
+    if subj is None and None in customargs:
         raise SyntaxError('Either "--subj" or all of "--srcsph", "--trgsph", "--srcsrf" and "--trgsrf" must be provided.')
-    if args.subj is not None and not None in customargs:
+    if subj is not None and not None in customargs:
         raise SyntaxError('Cannot use "--subj" together with "--srcsph", "--trgsph", "--srcsrf" or "--trgsrf".')
     
     # If a list of subjects was provided, let's use it
-    if args.subj is not None:
+    if subj is not None:
         # Find SUBJECTS_DIR
-        subjdir = args.subjdir
-        if args.subjdir is None:
+        if subjdir is None:
             subjdir = os.getenv('SUBJECTS_DIR')
         if subjdir == '' or subjdir is None:
             raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
@@ -139,7 +147,7 @@ if __name__ == '__main__':
             raise FileNotFoundError('"fsaverage" not found; make sure it exists in the subjects directory or that FreeSurfer is correctly installed')
     
         # Make a list of subjects
-        subjlist = args.subj.split(',')   
+        subjlist = subj.split(',')   
         H = ['lh', 'rh']
     else:
         subjlist = [None]
@@ -149,16 +157,16 @@ if __name__ == '__main__':
     for subj in subjlist:
         for h in H:
             if subj is None or h is None:
-                path1 = args.srcsph
-                path2 = args.trgsph
-                path3 = args.srcsrf
-                path4 = args.trgsrf
+                path1 = srcsph
+                path2 = trgsph
+                path3 = srcsrf
+                path4 = trgsrf
             else:
                 os.makedirs(os.path.join(subjdir, subj, 'after'), exist_ok=True)
                 path1 = os.path.join(subjdir, subj, 'surf',  '{}.sphere.reg'.format(h))
                 path2 = os.path.join(fsavgdir,      'surf',  '{}.sphere.reg'.format(h))
-                path3 = os.path.join(subjdir, subj, 'surf',  '{}.{}'.format(h, args.srf))
-                path4 = os.path.join(subjdir, subj, 'after', '{}.{}.retess'.format(h, args.srf))
+                path3 = os.path.join(subjdir, subj, 'surf',  '{}.{}'.format(h, srf))
+                path4 = os.path.join(subjdir, subj, 'after', '{}.{}.retess'.format(h, srf))
             print('Retessellating {}'.format(path3))
             
             # Default margin
@@ -173,9 +181,12 @@ if __name__ == '__main__':
                 raise FileNotFoundError('File does not exist: {}'.format(path3))
         
             # Load the surfaces using nibabel for FreeSurfer formats
+            # Will use the vertex coordinates as stored, which is equivalent to
+            # converting to RAS in this case. For other operations that require
+            # the RAS coordinates, these can be obtained with vtx = vtx + info['cras']
             vtx1, fac1 = nib.freesurfer.read_geometry(path1)
             vtx2, fac2 = nib.freesurfer.read_geometry(path2)
-            vtx3, fac3 = nib.freesurfer.read_geometry(path3)
+            vtx3, fac3, info3, stamp3 = nib.freesurfer.read_geometry(path3, read_metadata=True, read_stamp=True)
             nF1 = fac1.shape[0]
             nV2 = vtx2.shape[0]
             
@@ -233,7 +244,7 @@ if __name__ == '__main__':
             # For each source face
             start_time = time.time()
             for f in range(nF1):
-                if args.progress:
+                if progress:
                     update_progress(f, nF1, start_time, prefix='Processing faces:', min_update_interval=1)
                 
                 vidx = fac1[f, :]         # Indices of the vertices for face f
@@ -280,4 +291,5 @@ if __name__ == '__main__':
                         vtx4[Cidxi[v], :] = np.dot([aA, aB, aC], vtx3[vidx, :]) / aT
                 
             # Save output surface
-            nib.freesurfer.write_geometry(path4, vtx4, fac2)
+            nib.freesurfer.write_geometry(path4, vtx4, fac2, volume_info=info3, create_stamp=True)
+            print('Finished retessellation. Output saved to: {}'.format(path4))

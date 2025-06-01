@@ -2,7 +2,7 @@
 
 if [ -z "$1" ]; then
 cat <<EOU
-Retessellate surf/?h.orig, and then rerun recon-all from that point onwards.
+Runs various additional surface processing steps after FreeSurfer's recon-all.
 
 Usage:
 
@@ -25,12 +25,13 @@ Options:
 --curvatures
   Compute curvatures and their composites.
   
---makeviews
+--views
   Capture orthogonal views of surfaces and overlays, useful for quick
   inspection. These can be used to create an HTML file (see documentation).
 
 --revert
   Revert from the last backup if it exists thus deleting current FS results.
+  All other options will be ignored except --subj and (if provided) --sd.
 
 --nobackup
   Do not backup original outputs from recon-all, such that ${0##*/} will
@@ -44,8 +45,9 @@ Options:
 
 Requirements:
 * FreeSurfer must be installed and configured properly.
-* The subject must have been processed with recon-all up to the point where
-  the surface registration is performed (?h.sphere.reg must exist).
+* For --retessellate, the subject must have been processed with recon-all up
+  to the point where the surface registration is performed (?h.sphere.reg must
+  exist).
 * Either SUBJECTS_DIR must have been correctly set, or the option --sd must
   be provided with the path to the directory that contains all subjects.
 
@@ -89,7 +91,7 @@ DOREVERT=false          # Revert from the backup
 DOALL=false             # Do everything
 DORETESSELLATE=false    # Do the retessellation
 DOCURVATURES=false      # Compute the better curvatures and their composites
-DOMAKEVIEWS=false       # Capture views for later inspection
+DOVIEWS=false           # Capture views for later inspection
 PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
 
 # Parse arguments
@@ -116,8 +118,8 @@ while [[ ${#} -gt 0 ]] ; do
       DOCURVATURES=true
       shift
       ;;
-   -makeviews|--makeviews)
-      DOMAKEVIEWS=true
+   -views|--views)
+      DOVIEWS=true
       shift
       ;;
    -revert|--revert)
@@ -200,40 +202,40 @@ if [[ ! -z ${MISSING} ]] ; then
 fi
 
 # If this is the first run, move to a safe place, than bring back by copying, otherwise adapt accordingly
-if ${DOBACKUP} ; then
-   if [[ -e ${SUBJECTS_DIR}/${subj}/fs.bak ]] ; then
-      echo "Error: A backup already exists in ${SUBJECTS_DIR}/${subj}/fs.bak."
-      echo "To be able to run ${0##*/}, you need to remove or rename that backup. Aborting."
-      exit 1
-   else
-      echo "Moving previous FS outputs for ${subj} to ${SUBJECTS_DIR}/${subj}/fs.bak"
-      mkdir -p ${SUBJECTS_DIR}/${subj}/fs.bak
-      for dir in label mri scripts stats surf tmp touch trash ; do
-         mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/fs.bak/
-      done
-   fi
-   ALLGOOD=true
-   for dir in label mri scripts stats surf tmp touch trash ; do
-      [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
-   done
-   if ${ALLGOOD} ; then
-      echo "Making new copies from the backup; we will work on the copies; deleting previous copies if they exist."
-      for dir in label mri scripts stats surf tmp touch trash ; do
-         echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
-         rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
-         echo "- Copying ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} -> ${SUBJECTS_DIR}/${subj}/"
-         cp -rp ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
-      done
-   else
-      echo "Error: Bacup failed. ${SUBJECTS_DIR}/${subj}/fs.bak does not contain all data needed. Aborting."
-      exit 1
-   fi
-else
-   echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
-fi
-
-# Do the retessellation proper
 if ${DORETESSELLATE} || ${DOALL} ; then
+   if ${DOBACKUP} ; then
+      if [[ -e ${SUBJECTS_DIR}/${subj}/fs.bak ]] ; then
+         echo "Error: A backup already exists in ${SUBJECTS_DIR}/${subj}/fs.bak."
+         echo "To be able to run ${0##*/}, you need to remove or rename that backup. Aborting."
+         exit 1
+      else
+         echo "Moving previous FS outputs for ${subj} to ${SUBJECTS_DIR}/${subj}/fs.bak"
+         mkdir -p ${SUBJECTS_DIR}/${subj}/fs.bak
+         for dir in label mri scripts stats surf tmp touch trash ; do
+            mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/fs.bak/
+         done
+      fi
+      ALLGOOD=true
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
+      done
+      if ${ALLGOOD} ; then
+         echo "Making new copies from the backup; we will work on the copies; deleting previous copies if they exist."
+         for dir in label mri scripts stats surf tmp touch trash ; do
+            echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
+            rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
+            echo "- Copying ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} -> ${SUBJECTS_DIR}/${subj}/"
+            cp -rp ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
+         done
+      else
+         echo "Error: Backup failed. ${SUBJECTS_DIR}/${subj}/fs.bak does not contain all data needed. Aborting."
+         exit 1
+      fi
+   else
+      echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
+   fi
+
+   # Do the retessellation proper
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
    $(dirname "$(readlink -f "${0}")")/retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
@@ -311,11 +313,12 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 fi
 
 # Do the computation of better curvatures
-if ${DOCURVATURES} || ${DOALL} ; then
-   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
-fi
+#if ${DOCURVATURES} || ${DOALL} ; then
+#   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+#fi
 
 # Do the computation of better curvatures
-if ${DOMAKEVIEWS} || ${DOALL} ; then
-   $(dirname "$(readlink -f "${0}")")/makeviews.py --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+if ${DOVIEWS} || ${DOALL} ; then
+   (${DOCURVATURES} || ${DOALL}) && OPTS="--curvatures"
+   $(dirname "$(readlink -f "${0}")")/views.py --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi

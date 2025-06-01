@@ -14,7 +14,7 @@ import matplotlib.colors as mcolors
 import nibabel as nib
 from PIL import Image
 import gc
-from ..lib.io import read_surf, read_curv, read_annot, read_json
+from lib.io import read_surf, read_curv, read_annot, read_json
 
 def load_surf(subjdir, sub, surf, specs=None): # ==============================
     '''
@@ -246,12 +246,12 @@ def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
     with open(os.path.join(htmldir,'{}_{}.html'.format(surf,meas)), 'w', encoding='utf-8') as f:
         f.write('<html><body bgcolor="#222222"><table>\n')
         for subj in subjlist:
-            shotsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'shots'), start=htmldir)
+            viewsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'views'), start=htmldir)
             f.write('<tr>\n')
             for view in specs['views']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
-                    os.path.join(shotsdir, '{}_{}_{}.png'.format(surf, meas, view)),
-                    os.path.join(shotsdir, 'thumbnails','{}_{}_{}.png'.format(surf, meas, view)),
+                    os.path.join(viewsdir, '{}_{}_{}.png'.format(surf, meas, view)),
+                    os.path.join(viewsdir, 'thumbnails','{}_{}_{}.png'.format(surf, meas, view)),
                     '{}, {}, {}, {}'.format(subj, surf, meas, view)))
             f.write('</tr>\n')
         f.write('</table></body></html>')
@@ -272,14 +272,18 @@ if __name__ == "__main__":
                         help='Subjects directory (usually SUBJECTS_DIR)',
                         type=str, required=False, default=None)
     parser.add_argument('--nodefaults',
-                        help='Do not take shots for the default measures in the "label" and "surf" directories',
+                        help='Do not make views for the default measures in the "label" and "surf" directories',
                         action='store_true', required=False, default=False)
     parser.add_argument('--curvatures',
-                        help='Take shots for the curvatures in the "after/curvs" directory',
+                        help='Make views for the curvatures in the "after/curvs" directory',
                         action='store_true', required=False, default=False)
     parser.add_argument('--htmldir',
                         help='HTML directory',
                         type=str, required=False, default=None)
+    # Show a nice progress bar (only use in interactive sessions)
+    parser.add_argument('--progress',
+                        help='Show a progress bar',
+                        action='store_true', required=False, default=False)
     args    = parser.parse_args()
     subjdir = args.subjdir
     if args.subjdir is None or args.subjdir == '':
@@ -299,59 +303,62 @@ if __name__ == "__main__":
         subjlist = args.subj.split(',')
     
     # Load locations, colors, and view schemes from a file
-    specs = read_json(os.path.join(os.path.dirname(__file__), 'etc', 'takeshots.json'))
+    specs = read_json(os.path.join(os.path.dirname(__file__), 'etc', 'views.json'))
     
     # Surfaces and measures to plot
     surflist = []
     measlist = []
     if not args.nodefaults:
-        surflist.append(specs['defaults']['surf'])
-        measlist.append(specs['defaults']['meas'])
+        surflist = surflist + specs['defaults']['surf']
+        measlist = measlist + specs['defaults']['meas']
     if args.curvatures:
-        surflist.append(specs['curvatures']['surf'])
-        measlist.append(specs['curvatures']['meas'])
-    surflist = set(surflist)
-    measlist = set(measlist)
+        surflist = surflist + specs['curvatures']['surf']
+        measlist = measlist + specs['curvatures']['meas']
+    surflist = sorted(list(set(surflist)))
+    measlist = sorted(list(set(measlist)))
     
     if len(surflist) == 0:
         raise SyntaxError('No surfaces selected to plot. Nothing to do.')
     if len(measlist) == 0:
         meas = ['nothing']
-        
+    num_views = len(surflist)*len(measlist)
     
     # For each subject, make all figures
     for subj in subjlist:
+        print('Working on {}'.format(os.path.join(subjdir, subj)))
         
         # Where to save
         outdir = os.path.join(subjdir, subj, 'after', 'shots')
         os.makedirs(os.path.join(outdir,'thumbnails'), exist_ok=True)
         
         # For each surface and measure
+        v = 0
         for surf in surflist:
             for meas in measlist:
-                
+                v = v + 1 # Increment at the beginning
+
                 # Load/prepare the data
                 if os.path.exists(os.path.join(outdir,'thumbnails','{}_{}_{}.png'.format(surf, meas, 'bhpos'))):
-                    print('Skipping: {}, {}, {} (already done)'.format(subj, surf, meas))
+                    print('- Skipping ({}/{}): {}, {}, {} (already done)'.format(v, num_views, subj, surf, meas))
                     continue
                 elif meas == 'nothing':
                     vtx, fac = load_surf(subjdir, subj, surf, specs)
                     dat = np.zeros(vtx.shape[0])
                     rgb = np.array([[1,1,1]])*.75
                 elif not os.path.exists(os.path.join(subjdir, subj, specs['surf'][surf]['dir'], 'rh.{}'.format(surf))):
-                    print('Skipping: {}, {}, {} (missing {})'.format(subj, surf, meas, surf))
+                    print('- Skipping ({}/{}): {}, {}, {} (missing {})'.format(v, num_views, subj, surf, meas, surf))
                     continue
                 elif not os.path.exists(os.path.join(subjdir, subj, specs['meas'][meas]['dir'], 'rh.{}'.format(meas))):
-                    print('Skipping: {}, {}, {} (missing {})'.format(subj, surf, meas, meas))
+                    print('- Skipping ({}/{}): {}, {}, {} (missing {})'.format(v, num_views, subj, surf, meas, meas))
                     continue
                 else:
-                    print('Working on: {}, {}, {}'.format(subj, surf, meas))
+                    print('- Working on ({}/{}): {}, {}, {}'.format(v, num_views, subj, surf, meas))
                     vtx, fac = load_surf(subjdir, subj, surf, specs)
                     dat, rgb = load_data(subjdir, subj, meas, specs)
                    
                 # Plot and save main fig and thumbnail
                 plot_fig(vtx, fac, dat, rgb, outdir, surf, meas, specs)
-    
+                
     # For each combination of surfaces and meshes, make an HTML file
     if args.htmldir is not None and args.htmldir != '':
         for surf in surflist:

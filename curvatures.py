@@ -5,12 +5,14 @@ Created on Fri Mar  7 22:36:30 2025
 
 @author: winkleram
 """
+
+
 import os
 import argparse
 import numpy as np
 import time
-from ..lib.io import read_surf, read_obj, write_curv, write_mgh
-from ..lib.utils import progress_bar
+from lib.io import read_surf, read_obj, write_curv, write_mgh
+from lib.utils import progress_bar
 
 def calc_normals(vtx, fac): # =================================================
     '''
@@ -508,24 +510,41 @@ def calc_composites(curvs): # ================================================
     # Mean curvature
     curvs['H']     = (curvs['k1']+curvs['k2'])/2
 
-    # Curvature difference
-    curvs['kdiff'] = curvs['k1'] - curvs['k2']
-    
-    # Intrinsic Curvature Index (ICI, NICI, AICI)
-    curvs['ICI']   = np.maximum(curvs['K'],0)
-    curvs['NICI']  = np.maximum(curvs['K'],0) # Negative version
-    curvs['AICI']  = np.absolute(curvs['K'])  # Absolute version
-    
-    # Mean Curvature Index (ICI, NICI, AICI)
-    curvs['MCI']   = np.maximum(curvs['H'],0)
-    curvs['NMCI']  = np.maximum(curvs['H'],0) # Negative version
-    curvs['AMCI']  = np.absolute(curvs['H'])  # Absolute version
-    
+    # Gaussian-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Gauss Curvature L^2 Norm (GLN)
     curvs['GLN']   = curvs['K']**2
     
+    # Intrinsic Curvature Index (ICI, NICI, AICI)
+    curvs['ICI']   = np.maximum(curvs['K'],0)
+    curvs['NICI']  = np.minimum(curvs['K'],0) # Negative version
+    curvs['AICI']  = np.absolute(curvs['K'])  # Absolute version
+    
+    # Area Fraction of Intrinsic Curvature Index
+    curvs['FICI']  = (curvs['K'] > 0).astype(float)
+    curvs['FNICI'] = (curvs['K'] < 0).astype(float)
+    
+    # SK2SK
+    curvs['SK2SK'] = curvs['GLN'] / curvs['AICI']
+    
+    # Mean-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Mean Curvature L^2 Norm (MLN)
     curvs['MLN']   = curvs['H']**2
+    
+    # Mean Curvature Index (MCI, NMCI, AMCI)
+    curvs['MCI']   = np.maximum(curvs['H'],0)
+    curvs['NMCI']  = np.minimum(curvs['H'],0) # Negative version
+    curvs['AMCI']  = np.absolute(curvs['H'])  # Absolute version
+
+    # Area Fraction of Mean Curvature Index
+    curvs['FMCI']  = (curvs['H'] > 0).astype(float)
+    curvs['FNMCI'] = (curvs['H'] < 0).astype(float)
+    
+    # SH2SH
+    curvs['SH2SH'] = curvs['MLN'] / curvs['AMCI']
+    
+    # Mixed:  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    # Curvature difference
+    curvs['kdiff'] = curvs['k1'] - curvs['k2']
     
     # Folding Index
     curvs['FI']    = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
@@ -535,19 +554,7 @@ def calc_composites(curvs): # ================================================
     
     # Shape Index
     curvs['SI']    = 2*np.arctan((curvs['k1']+curvs['k2'])/(curvs['k1']-curvs['k2']))/np.pi
-    
-    # Area Fraction of Intrinsic Curvature Index
-    curvs['FICI']  = (curvs['K'] > 0).astype(float)
-    curvs['FNICI'] = (curvs['K'] < 0).astype(float)
-    
-    # Area Fraction of Mean Curvature Index
-    curvs['FMCI']  = (curvs['H'] > 0).astype(float)
-    curvs['FNMCI'] = (curvs['H'] < 0).astype(float)
-    
-    # SH2SH and SK2SK
-    curvs['SK2SK'] = curvs['GLN'] / curvs['AICI']
-    curvs['SH2SH'] = curvs['MLN'] / curvs['AMCI']
-    
+
     return curvs
 
 if __name__ == "__main__":

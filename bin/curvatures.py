@@ -9,8 +9,8 @@ import os
 import argparse
 import numpy as np
 import time
-from lib.io import read_surf, read_obj, write_curv, write_mgh
-from lib.utils import progress_bar
+from ..lib.io import read_surf, read_obj, write_curv, write_mgh
+from ..lib.utils import progress_bar
 
 def calc_normals(vtx, fac): # =================================================
     '''

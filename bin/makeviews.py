@@ -14,7 +14,7 @@ import matplotlib.colors as mcolors
 import nibabel as nib
 from PIL import Image
 import gc
-from lib.io import read_surf, read_curv, read_annot, read_json
+from ..lib.io import read_surf, read_curv, read_annot, read_json
 
 def load_surf(subjdir, sub, surf, specs=None): # ==============================
     '''

@@ -16,8 +16,21 @@ Options:
 --sd <subjects directory>
   Specify the subjects directory if not SUBJECTS_DIR.
 
+--all
+  Do everything.
+
+--retessellate
+  Do the retessellation to fsaverage.
+
+--curvatures
+  Compute curvatures and their composites.
+  
+--makeviews
+  Capture orthogonal views of surfaces and overlays, useful for quick
+  inspection. These can be used to create an HTML file (see documentation).
+
 --revert
-  Revert from the last backup if it exists thus deleting current results.
+  Revert from the last backup if it exists thus deleting current FS results.
 
 --nobackup
   Do not backup original outputs from recon-all, such that ${0##*/} will
@@ -71,59 +84,69 @@ check_fs() {
 }
 
 # Some default variables, will be modified later
-T2pial=false     # Do -T2pial?
-FLAIRpial=false  # Do -FLAIRpial?
-NOBACKUP=false   # Do not backup, just overwrite existing files
-REVERT=false     # Revert from the backup
-PROGRESS=""      # Show a progress bar when retessellating? (avoid using in the cluster)
+DOBACKUP=true           # Do backup by default, so we can revert if needed
+DOREVERT=false          # Revert from the backup
+DOALL=false             # Do everything
+DORETESSELLATE=false    # Do the retessellation
+DOCURVATURES=false      # Compute the better curvatures and their composites
+DOMAKEVIEWS=false       # Capture views for later inspection
+PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
 
 # Parse arguments
 while [[ ${#} -gt 0 ]] ; do
-  key="${1}"
-  case ${key} in
-    -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
+   key="${1}"
+   case ${key} in
+      -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
       subj="${2}"
       shift 2
       ;;
-    -sd|--sd)
+   -sd|--sd)
       SUBJECTS_DIR="${2}"
       shift 2
       ;;
-    -T2pial|--T2pial)
-      T2pial=true
+   -all|--all)
+      DOALL=true
       shift
       ;;
-    -FLAIRpial|--FLAIRpial)
-      FLAIRpial=true
+   -retessellate|--retessellate)
+      DORETESSELLATE=true
       shift
       ;;
-    -revert|--revert)
-      REVERT=true
+   -curvatures|--curvatures)
+      DOCURVATURES=true
       shift
       ;;
-    -nobackup|--nobackup)
-      NOBACKUP=true
+   -makeviews|--makeviews)
+      DOMAKEVIEWS=true
       shift
       ;;
-    -progress|--progress)
+   -revert|--revert)
+      DOREVERT=true
+      shift
+      ;;
+   -nobackup|--nobackup)
+      DOBACKUP=false
+      shift
+      ;;
+   -progress|--progress)
       PROGRESS="--progress"
       shift
       ;;
-    *)
+   *)
       echo "Unknown option: ${key}"
       exit 1
       ;;
-  esac
+   esac
 done
 
-# Argument checking
-if ${REVERT} && ${NOBACKUP} ; then
-   echo "Error: Cannot use --revert and --nobackup together."
-   exit 1
+# Make sure we have a valid SUBJECTS_DIR
+if [[ -z "${SUBJECTS_DIR}" ]] || [[ ! -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
+   echo "Error: SUBJECTS_DIR variable not set or path provided with --sd is invalid."
 fi
 
 # Revert from the backup and exit
-if ${REVERT} ; then
+if ${DOREVERT} ; then
+   echo "Will revert from previous backup for subject ${SUBJECTS_DIR}/${subj}. All other options will be ignored."
    ALLGOOD=true
    for dir in label mri scripts stats surf tmp touch trash ; do
       [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
@@ -135,8 +158,8 @@ if ${REVERT} ; then
          echo "- Reverting ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} to ${SUBJECTS_DIR}/${subj}"
          mv ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
       done
-      echo "- Removing ${SUBJECTS_DIR}/${subj}/${dir} if empty as it should"
-      rmdir ${SUBJECTS_DIR}/${subj}/fs.bak
+      echo "- Removing ${SUBJECTS_DIR}/${subj}/${dir} and any contents inside."
+      rm -rf ${SUBJECTS_DIR}/${subj}/fs.bak
       exit 0
    else
       echo "Error: Backup in ${SUBJECTS_DIR}/${subj}/fs.bak appears incomplete. Cannot revert automatically. Aborting."
@@ -177,9 +200,7 @@ if [[ ! -z ${MISSING} ]] ; then
 fi
 
 # If this is the first run, move to a safe place, than bring back by copying, otherwise adapt accordingly
-if ${NOBACKUP} ; then
-   echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
-else
+if ${DOBACKUP} ; then
    if [[ -e ${SUBJECTS_DIR}/${subj}/fs.bak ]] ; then
       echo "Error: A backup already exists in ${SUBJECTS_DIR}/${subj}/fs.bak."
       echo "To be able to run ${0##*/}, you need to remove or rename that backup. Aborting."
@@ -204,73 +225,97 @@ else
          cp -rp ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
       done
    else
-      echo "Error: ${SUBJECTS_DIR}/${subj}/fs.bak does not contain all data needed. Aborting."
+      echo "Error: Bacup failed. ${SUBJECTS_DIR}/${subj}/fs.bak does not contain all data needed. Aborting."
       exit 1
    fi
-fi
-
-# Now do the retessellation proper
-mkdir -p ${SUBJECTS_DIR}/${subj}/after
-$(dirname "$(readlink -f "${0}")")/retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
-
-# Replace the existing ?h.orig for the retessellated
-if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
-   [[ -f ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
-   mv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-   mv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
 else
-   echo "Retessellation failed. The expected output files were not both produced:"
-   echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
-   echo "- ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess"
-   exit 1
+   echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
 fi
 
-# If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
-[[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-[[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
-[[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
-[[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-[[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
-[[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
-OPTS=""
-${T2pial}    && OPTS="${OPTS} -T2pial"
-${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+# Do the retessellation proper
+if ${DORETESSELLATE} || ${DOALL} ; then
+   mkdir -p ${SUBJECTS_DIR}/${subj}/after
+   $(dirname "$(readlink -f "${0}")")/retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
-# Redo recon-all, from the point in which ?h.orig is used
-${FREESURFER_HOME}/bin/recon-all \
-  -s "${subj}" \
-  -sd "${SUBJECTS_DIR}" \
-  -white-preaparc \
-  -cortex-label \
-  -smooth2 \
-  -inflate2 \
-  -curvHK \
-  -sphere \
-  -surfreg \
-  -jacobian_white \
-  -avgcurv \
-  -cortparc \
-  -white \
-  -pial \
-  -curvstats \
-  -cortribbon \
-  -cortparc2 \
-  -cortparc3 \
-  -pctsurfcon \
-  -hyporelabel \
-  -aparc2aseg \
-  -apas2aseg \
-  -wmparc \
-  -parcstats \
-  -parcstats2 \
-  -parcstats3 \
-  -segstats \
-  -balabels ${OPTS}
+   # Replace the existing ?h.orig for the retessellated
+   if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
+      [[ -f ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
+      mv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      mv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+   else
+      echo "Retessellation failed. The expected output files were not both produced:"
+      echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
+      echo "- ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess"
+      exit 1
+   fi
 
-# Check if recon-all finished without error and make sure that that termination was just now
-result=($(check_fs))
-if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
-   echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
-   exit 1
+   # If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
+   T2pial=false
+   FLAIRpial=false
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
+   OPTS=""
+   ${T2pial}    && OPTS="${OPTS} -T2pial"
+   ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+
+   # Redo recon-all, from the point in which ?h.orig is used
+   ${FREESURFER_HOME}/bin/recon-all \
+     -s "${subj}" \
+     -sd "${SUBJECTS_DIR}" \
+     -white-preaparc \
+     -cortex-label \
+     -smooth2 \
+     -inflate2 \
+     -curvHK \
+     -sphere \
+     -surfreg \
+     -jacobian_white \
+     -avgcurv \
+     -cortparc \
+     -white \
+     -pial \
+     -curvstats \
+     -cortribbon \
+     -cortparc2 \
+     -cortparc3 \
+     -pctsurfcon \
+     -hyporelabel \
+     -aparc2aseg \
+     -apas2aseg \
+     -wmparc \
+     -parcstats \
+     -parcstats2 \
+     -parcstats3 \
+     -segstats \
+     -balabels ${OPTS}
+
+   # Check if recon-all finished without error and make sure that that termination was just now
+   result=($(check_fs))
+   if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+      echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
+      exit 1
+   fi
+
+   # Create the retessellated midthickness surface (not a typical FS output but sometimes created by other programs)
+   for h in lh rh ; do
+      if [[ -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
+         ${FREESURFER_HOME}/bin/mris_expand \
+                    -thickness ${SUBJECTS_DIR}/${subj}/surf/${h}.white  \
+                     0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
+      fi
+   done
 fi
 
+# Do the computation of better curvatures
+if ${DOCURVATURES} || ${DOALL} ; then
+   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+fi
+
+# Do the computation of better curvatures
+if ${DOMAKEVIEWS} || ${DOALL} ; then
+   $(dirname "$(readlink -f "${0}")")/makeviews.py --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+fi

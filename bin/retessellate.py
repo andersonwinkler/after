@@ -10,8 +10,8 @@ import os
 import numpy as np
 import argparse
 import time
-from lib.io    import read_surf, write_surf
-from lib.utils import progress_bar
+from ..lib.io    import read_surf, write_surf
+from ..lib.utils import progress_bar
 
 if __name__ == '__main__':
 

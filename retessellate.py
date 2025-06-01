@@ -7,71 +7,11 @@ Created on Mon Sep 16 14:11:57 2024
 """
 
 import os
-import nibabel as nib
 import numpy as np
 import argparse
 import time
-
-def update_progress(current, total, start_time=None, bar_length=40, prefix='Progress:', 
-                    update_frequency=0.01, min_update_interval=10):
-    """
-    Display a progress bar with time estimation and smart update frequency.
-    
-    Args:
-        current (int): Current iteration (0-indexed)
-        total (int): Total iterations
-        start_time (float): Time when the process started (from time.time())
-        bar_length (int): Length of the progress bar in characters
-        prefix (str): Text to display before the progress bar
-        update_frequency (float): Update frequency as a fraction of total (0.01 = every 1%)
-        min_update_interval (int): Minimum number of iterations between updates
-    
-    Returns:
-        bool: True if progress was updated, False otherwise
-    """
-    # Initialize start time if not provided
-    if start_time is None:
-        start_time = time.time()
-    
-    # Determine update interval (max of percentage-based and minimum interval)
-    update_interval = max(1, min(min_update_interval, int(total * update_frequency)))
-    
-    # Check if we should update the progress bar
-    should_update = (current % update_interval == 0) or (current == total - 1)
-    
-    if not should_update:
-        return False
-    
-    # Calculate percentage and create the progress bar
-    percent = 100.0 * (current + 1) / total
-    filled_length = int(bar_length * percent / 100)
-    bar = '█' * filled_length + '░' * (bar_length - filled_length)
-    
-    # Calculate time information
-    elapsed_time = time.time() - start_time
-    if current > 0:  # Avoid division by zero
-        iterations_per_sec = current / elapsed_time
-        remaining_iterations = total - current - 1
-        eta_seconds = remaining_iterations / iterations_per_sec if iterations_per_sec > 0 else 0
-        
-        # Format time strings
-        eta_str = time.strftime("%H:%M:%S", time.gmtime(eta_seconds))
-        elapsed_str = time.strftime("%H:%M:%S", time.gmtime(elapsed_time))
-        time_info = f"| {elapsed_str} elapsed | ETA: {eta_str}"
-    else:
-        time_info = ""
-    
-    # Create the progress message
-    message = f"\r{prefix} [{bar}] {percent:.1f}% ({current+1}/{total}) {time_info}"
-    
-    # Print the progress bar
-    print(message, end='', flush=True)
-    
-    # Add a newline when complete
-    if current == total - 1:
-        print()
-    
-    return True
+from lib.io    import read_surf, write_surf
+from lib.utils import progress_bar
 
 if __name__ == '__main__':
 
@@ -111,8 +51,9 @@ if __name__ == '__main__':
     parser.add_argument('--progress',
                         help='Show a progress bar',
                         action='store_true', required=False, default=False)
-    args = parser.parse_args()
-    
+
+    # Parsing proper
+    args     = parser.parse_args()
     subj     = args.subj
     subjdir  = args.subjdir
     srf      = args.srf
@@ -122,7 +63,7 @@ if __name__ == '__main__':
     trgsrf   = args.trgsrf
     progress = args.progress
     
-    # Confirm whether we are using a default FS subject structure, or isolated, custom files
+    # Check whether we are using a default FS subject structure, or isolated, custom files
     customargs = [srcsph, trgsph, srcsrf, trgsrf]
     if subj is None and None in customargs:
         raise SyntaxError('Either "--subj" or all of "--srcsph", "--trgsph", "--srcsrf" and "--trgsrf" must be provided.')
@@ -184,9 +125,9 @@ if __name__ == '__main__':
             # Will use the vertex coordinates as stored, which is equivalent to
             # converting to RAS in this case. For other operations that require
             # the RAS coordinates, these can be obtained with vtx = vtx + info['cras']
-            vtx1, fac1 = nib.freesurfer.read_geometry(path1)
-            vtx2, fac2 = nib.freesurfer.read_geometry(path2)
-            vtx3, fac3, info3, stamp3 = nib.freesurfer.read_geometry(path3, read_metadata=True, read_stamp=True)
+            vtx1, fac1, _, _ = read_surf(path1)
+            vtx2, fac2, _, _ = read_surf(path2)
+            vtx3, fac3, info3, stamp3 = read_surf(path3)
             nF1 = fac1.shape[0]
             nV2 = vtx2.shape[0]
             
@@ -245,7 +186,7 @@ if __name__ == '__main__':
             start_time = time.time()
             for f in range(nF1):
                 if progress:
-                    update_progress(f, nF1, start_time, prefix='Processing faces:', min_update_interval=1)
+                    progress_bar(f, nF1, start_time, prefix='Processing faces:', min_update_interval=1)
                 
                 vidx = fac1[f, :]         # Indices of the vertices for face f
                 Fvtx = vtx1[vidx, :]      # Corresponding vertex coordinates from vtx1
@@ -291,5 +232,6 @@ if __name__ == '__main__':
                         vtx4[Cidxi[v], :] = np.dot([aA, aB, aC], vtx3[vidx, :]) / aT
                 
             # Save output surface
-            nib.freesurfer.write_geometry(path4, vtx4, fac2, volume_info=info3, create_stamp=True)
-            print('Finished retessellation. Output saved to: {}'.format(path4))
+            print('Saving results to: {}'.format(path4))
+            write_surf(path4, vtx4, fac2, info3, stamp=True)
+    print('Finished retessellation.')

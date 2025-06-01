@@ -1,4 +1,12 @@
 {
+  "defaults": {
+    "surf": ["inflated", "pial", "white"],
+    "meas": ["aparc.annot", "thickness", "curv", "sulc", "jacobian_white", "w-g.pct.mgh", "aparc.a2009s.annot", "area", "volume"]
+  },
+  "curvatures": {
+    "surf": ["inflated", "pial", "white"],
+    "meas": ["k1", "k2", "K", "H", "kdiff", "ICI", "NICI", "AICI", "MCI", "NMCI", "AMCI", "GLN", "MLN", "FI", "CI", "SI", "FICI", "FNICI", "FMCI", "FNMCI", "SK2SK", "SH2SH", "varea"]
+  },
   "surf": {
     "orig.nofix": {
       "dir": "surf"
@@ -32,9 +40,17 @@
     },
     "pial": {
       "dir": "surf"
+    },
+    "midthickness": {
+      "dir": "surf"
     }
   },
   "meas": {
+    "nothing": {
+      "dir": null,
+      "cmap": null,
+      "clim": null
+    },
     "curv": {
       "dir": "surf",
       "cmap": "bwr",

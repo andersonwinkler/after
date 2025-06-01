@@ -16,13 +16,6 @@ Options:
 --sd <subjects directory>
   Specify the subjects directory if not SUBJECTS_DIR.
 
---T2pial
-  Explicitly use T2pial option for recon-all, even if not originally used.
-  The T2 file must have been provided in the original call to recon-all.
-
---FLAIRpial
-  The FLAIR file must have been provided in the original call to recon-all.
-
 --revert
   Revert from the last backup if it exists thus deleting current results.
 
@@ -33,8 +26,8 @@ Options:
   risking losing data or have limited storage space.
 
 --progress
-  Show a progress bar when retessellating. Avoid if running in a
-  cluster or headless system, but encouraged in interactive sessions.
+  Show a progress bar in longer steps. Avoid if running in a cluster
+  or headless system, but encouraged in interactive sessions.
 
 Requirements:
 * FreeSurfer must be installed and configured properly.
@@ -51,6 +44,31 @@ https://brainder.org
 EOU
 exit 1
 fi
+
+check_fs() {
+   # Check if the last run of recon-all was successful
+   if [[ -f ${SUBJECTS_DIR}/${subj}/scripts/recon-all-status.log ]] ; then
+      local fslog=$(sed '/^\s*$/d' ${SUBJECTS_DIR}/${subj}/scripts/recon-all-status.log | tail -n 1)
+      if [[ ${fslog} =~ "exited with ERRORS" ]] ; then
+         status=failed
+         tdelta=indeterminable
+      elif [[ ${fslog} =~ "finished without error" ]]; then
+         status=success
+         timestamp=$(echo "${fslog}" | sed 's/.*at //')
+         tdelta=$(( $(date +%s) - $(date -d "${timestamp}" +%s) ))
+      else
+         status=unknown
+         tdelta=unknown
+      fi
+   else
+      status=unknown
+      tdelta=unknown
+   fi
+   local -a result
+   result[0]=${status}
+   result[1]=${tdelta}
+   echo "${result[@]}"
+}
 
 # Some default variables, will be modified later
 T2pial=false     # Do -T2pial?
@@ -99,7 +117,7 @@ while [[ ${#} -gt 0 ]] ; do
 done
 
 # Argument checking
-if ${REVERT} && ! ${NOBACKUP} ; then
+if ${REVERT} && ${NOBACKUP} ; then
    echo "Error: Cannot use --revert and --nobackup together."
    exit 1
 fi
@@ -114,7 +132,7 @@ if ${REVERT} ; then
       for dir in label mri scripts stats surf tmp touch trash ; do
          echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
          rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
-         echo "- Reverting ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} -> ${SUBJECTS_DIR}/${subj}"
+         echo "- Reverting ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} to ${SUBJECTS_DIR}/${subj}"
          mv ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
       done
       echo "- Removing ${SUBJECTS_DIR}/${subj}/${dir} if empty as it should"
@@ -132,7 +150,8 @@ if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
    exit 1
 fi
 
-# Confirm that FS has run successfully up to this stage; if not, inform the user about the missing file
+# Confirm that FS has run successfully up to the stage we need; if not, inform the user about the missing file
+# Note we don't care here if recon-all.log shows last a failed run. As long as these files exist, we are ok to proceed.
 FILELIST=(
    ${SUBJECTS_DIR}/${subj}/mri/brain.finalsurfs.mgz
    ${SUBJECTS_DIR}/${subj}/surf/lh.orig
@@ -207,16 +226,12 @@ else
 fi
 
 # If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
-if ! ${T2pial} ; then
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
-fi
-if ! ${FLAIRpial} ; then
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
-fi
+[[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+[[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
+[[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
+[[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+[[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
+[[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
 OPTS=""
 ${T2pial}    && OPTS="${OPTS} -T2pial"
 ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
@@ -252,4 +267,10 @@ ${FREESURFER_HOME}/bin/recon-all \
   -segstats \
   -balabels ${OPTS}
 
+# Check if recon-all finished without error and make sure that that termination was just now
+result=($(check_fs))
+if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+   echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
+   exit 1
+fi
 

@@ -7,14 +7,14 @@ Created on Fri May 23 20:56:06 2025
 """
 import os
 import numpy as np
-import nibabel as nib
 import glob
 import argparse
 import pyvista as pv
 import matplotlib.colors as mcolors
+import nibabel as nib
 from PIL import Image
 import gc
-import json
+from lib.io import read_surf, read_curv, read_annot, read_json
 
 def load_surf(subjdir, sub, surf, specs=None): # ==============================
     '''
@@ -70,7 +70,7 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
     vtx = {}
     fac = {}
     for h in ['lh', 'rh']:
-        vtx[h], fac[h] = nib.freesurfer.read_geometry(surfname[h])
+        vtx[h], fac[h], _, _  = read_surf(surfname[h])
     
     # Shift coords a bit for inflated or sphere
     if 'inflated' in surf or 'sphere' in surf:
@@ -138,16 +138,16 @@ def load_data(subjdir, sub, meas, specs=None): # ==============================
     dat = {}
     if meas.endswith('.mgz') or meas.endswith('.mgh'):
         for h in ['lh', 'rh']:
-            dat[h] = np.squeeze(nib.load(measname[h]).get_fdata())
+            dat[h] = np.squeeze(nib.load(measname[h]).get_fdata()) # XXX pending fix
         rgb = None
     elif meas.endswith('annot'):
         for h in ['lh', 'rh']:
-            lab, ctab, _ = nib.freesurfer.io.read_annot(measname[h], orig_ids=False)
+            lab, ctab, _ = read_annot(measname[h])
             dat[h] = lab2fac(lab, fac[h])
         rgb = ctab[:,0:3]
     else:
         for h in ['lh', 'rh']:
-            dat[h] = nib.freesurfer.io.read_morph_data(measname[h])
+            dat[h] = read_curv(measname[h])
         rgb = None
     
     # Create "both" hemispheres
@@ -256,28 +256,9 @@ def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
             f.write('</tr>\n')
         f.write('</table></body></html>')
 
-
-def readjson(jsonfile): # =====================================================
-    '''
-    Read a json file to dict.
-    '''
-    with open(jsonfile, 'r') as fp:
-        J = json.load(fp)
-    return J
-
-def writejson(J, jsonfile): # =================================================
-    '''
-    Write a dict to json file.
-    '''
-    with open(jsonfile, 'w') as fp:
-        json.dump(J, fp, indent=2)
-    return
-
 ######## MAIN FUNCTION ########################################################
 if __name__ == "__main__":
-    # For headless display (slower)
-    #pv.start_xvfb()
-    
+
     # Argument parser
     parser = argparse.ArgumentParser(
                         description=\
@@ -290,6 +271,12 @@ if __name__ == "__main__":
     parser.add_argument('--subjdir',
                         help='Subjects directory (usually SUBJECTS_DIR)',
                         type=str, required=False, default=None)
+    parser.add_argument('--nodefaults',
+                        help='Do not take shots for the default measures in the "label" and "surf" directories',
+                        action='store_true', required=False, default=False)
+    parser.add_argument('--curvatures',
+                        help='Take shots for the curvatures in the "after/curvs" directory',
+                        action='store_true', required=False, default=False)
     parser.add_argument('--htmldir',
                         help='HTML directory',
                         type=str, required=False, default=None)
@@ -310,14 +297,28 @@ if __name__ == "__main__":
                 subjlist.append(tnam)
     else:
         subjlist = args.subj.split(',')
-        
-    # Surfaces and measures to plot
-    surflist = ['inflated','pial','white']
-    measlist = ['aparc.annot', 'thickness', 'curv', 'sulc', 'jacobian_white', 'w-g.pct.mgh']
     
-    # Load locations, colors, and view schemes from a fileS
-    specs = readjson(os.path.join(os.path.dirname(__file__), 'etc', 'takeshots.json'))
-
+    # Load locations, colors, and view schemes from a file
+    specs = read_json(os.path.join(os.path.dirname(__file__), 'etc', 'takeshots.json'))
+    
+    # Surfaces and measures to plot
+    surflist = []
+    measlist = []
+    if not args.nodefaults:
+        surflist.append(specs['defaults']['surf'])
+        measlist.append(specs['defaults']['meas'])
+    if args.curvatures:
+        surflist.append(specs['curvatures']['surf'])
+        measlist.append(specs['curvatures']['meas'])
+    surflist = set(surflist)
+    measlist = set(measlist)
+    
+    if len(surflist) == 0:
+        raise SyntaxError('No surfaces selected to plot. Nothing to do.')
+    if len(measlist) == 0:
+        meas = ['nothing']
+        
+    
     # For each subject, make all figures
     for subj in subjlist:
         
@@ -328,21 +329,28 @@ if __name__ == "__main__":
         # For each surface and measure
         for surf in surflist:
             for meas in measlist:
+                
+                # Load/prepare the data
                 if os.path.exists(os.path.join(outdir,'thumbnails','{}_{}_{}.png'.format(surf, meas, 'bhpos'))):
                     print('Skipping: {}, {}, {} (already done)'.format(subj, surf, meas))
+                    continue
+                elif meas == 'nothing':
+                    vtx, fac = load_surf(subjdir, subj, surf, specs)
+                    dat = np.zeros(vtx.shape[0])
+                    rgb = np.array([[1,1,1]])*.75
                 elif not os.path.exists(os.path.join(subjdir, subj, specs['surf'][surf]['dir'], 'rh.{}'.format(surf))):
                     print('Skipping: {}, {}, {} (missing {})'.format(subj, surf, meas, surf))
+                    continue
                 elif not os.path.exists(os.path.join(subjdir, subj, specs['meas'][meas]['dir'], 'rh.{}'.format(meas))):
                     print('Skipping: {}, {}, {} (missing {})'.format(subj, surf, meas, meas))
+                    continue
                 else:
                     print('Working on: {}, {}, {}'.format(subj, surf, meas))
-                    
-                    # Load the data
                     vtx, fac = load_surf(subjdir, subj, surf, specs)
                     dat, rgb = load_data(subjdir, subj, meas, specs)
                    
-                    # Plot and save main fig and thumbnail
-                    plot_fig(vtx, fac, dat, rgb, outdir, surf, meas, specs)
+                # Plot and save main fig and thumbnail
+                plot_fig(vtx, fac, dat, rgb, outdir, surf, meas, specs)
     
     # For each combination of surfaces and meshes, make an HTML file
     if args.htmldir is not None and args.htmldir != '':

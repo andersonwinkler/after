@@ -135,7 +135,7 @@ while [[ ${#} -gt 0 ]] ; do
       shift
       ;;
    *)
-      echo "Unknown option: ${key}"
+      echo "Error: Unknown option: ${key}"
       exit 1
       ;;
    esac
@@ -313,12 +313,13 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 fi
 
 # Do the computation of better curvatures
-#if ${DOCURVATURES} || ${DOALL} ; then
-#   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
-#fi
+if ${DOCURVATURES} || ${DOALL} ; then
+   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+fi
 
-# Do the computation of better curvatures
+# Make nice figures and histograms for inspection
 if ${DOVIEWS} || ${DOALL} ; then
    (${DOCURVATURES} || ${DOALL}) && OPTS="--curvatures"
    $(dirname "$(readlink -f "${0}")")/views.py --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi
+

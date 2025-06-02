@@ -15,6 +15,10 @@ import nibabel as nib
 from PIL import Image
 import gc
 from lib.io import read_surf, read_curv, read_annot, read_json
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
+from matplotlib.colors import Normalize
 
 def load_surf(subjdir, sub, surf, specs=None): # ==============================
     '''
@@ -30,7 +34,7 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
         Name of a FreeSurfer surface, e.g., white, pial, inflated, sphere, sphere.reg, etc.
         or a path to that surface (filename must start with lh or rh)
     specs : dict
-        Optional dict with a subdict under 'surf' from which some info is obtained.
+        Optional dict with a subdict under 'surfaces' from which some info is obtained.
 
     Returns
     -------
@@ -55,12 +59,12 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
         else:
             raise ValueError('Surface file name must start with "lh" or "rh".')
     else:
-        fnam = os.path.join(subjdir, sub, specs['surf'][surf]['dir'], 'lh.{}'.format(surf))
+        fnam = os.path.join(subjdir, sub, specs['surfaces'][surf]['dir'], 'lh.{}'.format(surf))
         if os.path.exists(fnam):
             surfname['lh'] = fnam
         else:
             raise ValueError('File does not exist: {}.'.format(fnam))
-        fnam = os.path.join(subjdir, sub, specs['surf'][surf]['dir'], 'rh.{}'.format(surf))
+        fnam = os.path.join(subjdir, sub, specs['surfaces'][surf]['dir'], 'rh.{}'.format(surf))
         if os.path.exists(fnam):
             surfname['rh'] = fnam
         else:
@@ -85,7 +89,7 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
         fac[h] = np.hstack((3*np.ones((fac[h].shape[0],1)).astype(int),fac[h]))
     return vtx, fac
 
-def load_data(subjdir, sub, meas, specs=None): # ==============================
+def load_meas(subjdir, sub, meas, specs=None): # ==============================
     '''
     Load overlay measure
 
@@ -98,7 +102,7 @@ def load_data(subjdir, sub, meas, specs=None): # ==============================
     meas : str
         Overlay measure, e.g., thichness, sulc, curv, etc.
     specs: dict
-        Optional dict with a subdict under 'meas' from which some info is obtained.
+        Optional dict with a subdict under 'measures' from which some info is obtained.
         
     Returns
     -------
@@ -123,12 +127,12 @@ def load_data(subjdir, sub, meas, specs=None): # ==============================
         else:
             raise ValueError('Measure file name must start with "lh" or "rh".')
     else:
-        fnam = os.path.join(subjdir, sub, specs['meas'][meas]['dir'], 'lh.{}'.format(meas))
+        fnam = os.path.join(subjdir, sub, specs['measures'][meas]['dir'], 'lh.{}'.format(meas))
         if os.path.exists(fnam):
             measname['lh'] = fnam
         else:
             raise ValueError('File does not exist: {}.'.format(fnam))
-        fnam = os.path.join(subjdir, sub, specs['meas'][meas]['dir'], 'rh.{}'.format(meas))
+        fnam = os.path.join(subjdir, sub, specs['measures'][meas]['dir'], 'rh.{}'.format(meas))
         if os.path.exists(fnam):
             measname['rh'] = fnam
         else:
@@ -184,28 +188,45 @@ def lab2fac(lab, fac): # ======================================================
     newlab[idx2,0] = labf[idx2,2] # vtx3 has the final say
     return newlab
 
-def plot_fig(vtx, fac, dat, rgb, outdir, mesh, meas, specs): # ================
+def plot_view(vtx, fac, dat, outdir, mesh, meas, specs): # ================
     '''
-    Plot figures. Variables are as in the other functions.
+    Plot views.
     '''
-    # Define colormaps and color limits
-    if meas.endswith('annot'):
-        if meas not in specs['meas']:
-            specs['meas'][meas] = {}
-        specs['meas'][meas]['cmap'] = mcolors.LinearSegmentedColormap.from_list('', rgb/255)
-        specs['meas'][meas]['clim'] = None
-    elif meas not in specs['meas']:
-        cmin = np.min(dat['bh'])
-        cmax = np.max(dat['bh'])
-        if cmin*cmax < 0:
+    # Define colormaps and color limits for edge cases.
+    # All others come from the specs variable
+    # dlim (data limit) isn't used in this function but kept for clarity and
+    # future reuse
+    if meas not in specs['measures']:
+        specs['measures'][meas] = {}
+    if 'dir' not in specs['measures'][meas]:
+        specs['measures'][meas]['dir'] = 'after'
+    if 'dlim' not in specs['measures'][meas]:
+        dmin = np.min(dat['bh'])
+        dmax = np.max(dat['bh'])
+        if dmin*dmax < 0:
+            mx = max(abs(dmin),abs(dmax))
+            dlim = [-mx, mx]
+        else:
+            dlim = [dmin, dmax]
+        specs['measures'][meas]['dlim'] = dlim
+    if 'clim' not in specs['measures'][meas]:
+        specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
+    if 'cmap' not in specs['measures'][meas]:
+        prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
+        if prod < 0:
             cmap = 'bwr'
-            mx = max(abs(cmin),abs(cmax))
-            clim = [-mx, mx]
         else:
             cmap = 'viridis'
-            clim = [cmin, cmax]
-        specs['meas'][meas] = {'cmap': cmap, 'clim': clim}
-
+        specs['measures'][meas]['cmap'] = cmap
+    
+    # Prepare the colormap
+    if 'rgb' in specs['measures'][meas]:
+        rgb = specs['measures'][meas]['rgb'] / 255.0
+        cmap = mcolors.LinearSegmentedColormap.from_list('', rgb)
+    else:
+        cmap = specs['measures'][meas]['cmap']
+    clim = specs['measures'][meas]['clim']
+    
     # Meshes for subsequent plotting
     mesh = {}
     for h in ['lh','rh','bh']:
@@ -221,10 +242,10 @@ def plot_fig(vtx, fac, dat, rgb, outdir, mesh, meas, specs): # ================
         else:
             h = 'bh'
         
-        # Render the image, save as a file  
+        # Render the image, save as a file
         p = pv.Plotter(window_size=(2000, 2000), off_screen=True)
         p.background_color = (0, 0, 0)
-        p.add_mesh(mesh[h], clim=specs['meas'][meas]['clim'], cmap=specs['meas'][meas]['cmap'], show_scalar_bar=False)
+        p.add_mesh(mesh[h], clim=clim, cmap=cmap, show_scalar_bar=False)
         p.view_xz()
         p.camera.elevation = specs['views'][view]['elevation']
         p.camera.azimuth   = specs['views'][view]['azimuth']
@@ -237,6 +258,109 @@ def plot_fig(vtx, fac, dat, rgb, outdir, mesh, meas, specs): # ================
         pv.close_all()
         del p
         gc.collect()
+
+def plot_hist(dat, cbins, outdir, meas, specs): # =============================
+    # Define colormaps and color limits for edge cases.
+    # All others come from the specs variable
+    if meas not in specs['measures']:
+        specs['measures'][meas] = {}
+    if 'dir' not in specs['measures'][meas]:
+        specs['measures'][meas]['dir'] = 'after'
+    if 'dlim' not in specs['measures'][meas]:
+        dmin = np.min(dat['bh'])
+        dmax = np.max(dat['bh'])
+        if dmin*dmax < 0:
+            mx = max(abs(dmin),abs(dmax))
+            dlim = [-mx, mx]
+        else:
+            dlim = [dmin, dmax]
+        specs['measures'][meas]['dlim'] = dlim
+    if 'clim' not in specs['measures'][meas]:
+        specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
+    if 'cmap' not in specs['measures'][meas]:
+        prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
+        if prod < 0:
+            cmap = 'bwr'
+        else:
+            cmap = 'viridis'
+        specs['measures'][meas]['cmap'] = cmap
+    
+    # Prepare the colormap
+    if 'rgb' in specs['measures'][meas]:
+        rgb    = specs['measures'][meas]['rgb'] / 255.0
+        cmap   = mcolors.LinearSegmentedColormap.from_list('', rgb)
+        dlim   = [0, rgb.shape[0]]
+        dbins  = rgb.shape[0]
+    else:
+        cmap   = plt.colormaps[specs['measures'][meas]['cmap']]
+        dlim   = specs['measures'][meas]['dlim']
+        deltad = specs['measures'][meas]['dlim'][1] - specs['measures'][meas]['dlim'][0]
+        deltac = specs['measures'][meas]['clim'][1] - specs['measures'][meas]['clim'][0]
+        dbins  = int(np.ceil(cbins * deltad / deltac))
+    clim = specs['measures'][meas]['clim']
+    
+    # For each hemisphere
+    for h in ['lh', 'rh', 'bh']:
+        
+        # We want to replace label numbers for 0, 1, 2...
+        if 'rgb' in specs['measures'][meas]:
+            _, dat[h] = np.unique(dat[h], return_inverse=True)
+        
+        # Data for the histogram
+        counts, bin_edges = np.histogram(dat[h], bins=dbins, range=dlim)
+        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
+        
+        # Handle coloring based on whether we have RGB array or continuous colormap
+        if 'rgb' in specs['measures'][meas]:
+            # For RGB array: dat[h] contains integers corresponding to RGB rows
+            # Create colors for each bin based on the integer values
+            bar_colors = []
+            for center in bin_centers:
+                # Find the closest integer (which corresponds to RGB row index)
+                idx = int(np.round(center))
+                # Ensure index is within bounds
+                idx = np.clip(idx, 0, len(rgb) - 1)
+                bar_colors.append(rgb[idx])
+            bar_colors = np.array(bar_colors)
+        else:
+            # For continuous colormap: use the existing clamping approach
+            norm = Normalize(vmin=clim[0], vmax=clim[1], clip=False)
+            bar_colors = cmap(norm(bin_centers))
+        
+        # Main figure
+        fig = plt.figure(figsize=(20, 20))  # 2000x2000 pixels at 100 DPI
+        plot_width  = 0.6   # 60% of figure width for 4:3 ratio
+        plot_height = 0.45  # 45% of figure height for 4:3 ratio
+        left   = (1 - plot_width) / 2
+        bottom = (1 - plot_height) / 2
+        ax = fig.add_axes([left, bottom, plot_width, plot_height])
+        ax.bar(bin_centers, counts, width=np.diff(bin_edges), color=bar_colors)
+        ax.set_xlim(dlim[0], dlim[1])
+        ax.set_xlabel(meas)
+        ax.set_ylabel('Frequency')
+        plt.savefig(os.path.join(outdir, 'hist_{}_{}.png'.format(meas, h)),
+                    dpi=100, facecolor='white', edgecolor='none')
+        plt.close(fig)
+        
+        # Thumbnail
+        fig_thumb = plt.figure(figsize=(2, 2))  # 200x200 pixels at 100 DPI
+        plot_width  = 0.96  # 96% of figure width for 4:3 ratio
+        plot_height = 0.72  # 72% of figure height for 4:3 ratio
+        left   = (1 - plot_width) / 2
+        bottom = (1 - plot_height) / 2
+        ax_thumb = fig_thumb.add_axes([left, bottom, plot_width, plot_height])
+        ax_thumb.bar(bin_centers, counts, width=np.diff(bin_edges), color=bar_colors)
+        ax_thumb.set_xlim(dlim[0], dlim[1])
+        ax_thumb.set_xticks([])
+        ax_thumb.set_yticks([])
+        ax_thumb.spines['top'].set_visible(False)
+        ax_thumb.spines['right'].set_visible(False)
+        ax_thumb.spines['bottom'].set_visible(False)
+        ax_thumb.spines['left'].set_visible(False)
+        plt.figure(fig_thumb.number)  # Ensure we're saving the thumbnail figure
+        plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}.png'.format(meas, h)),
+                    dpi=100, facecolor='white', edgecolor='none')
+        plt.close(fig_thumb)
         
 def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
     '''
@@ -253,6 +377,11 @@ def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
                     os.path.join(viewsdir, '{}_{}_{}.png'.format(surf, meas, view)),
                     os.path.join(viewsdir, 'thumbnails','{}_{}_{}.png'.format(surf, meas, view)),
                     '{}, {}, {}, {}'.format(subj, surf, meas, view)))
+            for h in ['lh', 'rh', 'bh']:
+                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
+                    os.path.join(viewsdir, 'hist_{}_{}.png'.format(meas, h)),
+                    os.path.join(viewsdir, 'thumbnails','hist_{}_{}.png'.format(meas, h)),
+                    '{}, {}, {}'.format(subj, meas, h)))
             f.write('</tr>\n')
         f.write('</table></body></html>')
 
@@ -328,7 +457,7 @@ if __name__ == "__main__":
         print('Working on {}'.format(os.path.join(subjdir, subj)))
         
         # Where to save
-        outdir = os.path.join(subjdir, subj, 'after', 'shots')
+        outdir = os.path.join(subjdir, subj, 'after', 'views')
         os.makedirs(os.path.join(outdir,'thumbnails'), exist_ok=True)
         
         # For each surface and measure
@@ -343,21 +472,32 @@ if __name__ == "__main__":
                     continue
                 elif meas == 'nothing':
                     vtx, fac = load_surf(subjdir, subj, surf, specs)
-                    dat = np.zeros(vtx.shape[0])
+                    dat = {}
+                    for h in ['lh', 'rh', 'bh']:
+                        dat[h] = np.zeros(vtx.shape[0])
                     rgb = np.array([[1,1,1]])*.75
-                elif not os.path.exists(os.path.join(subjdir, subj, specs['surf'][surf]['dir'], 'rh.{}'.format(surf))):
+                    specs['measures'][meas]['cmap'] = None
+                    specs['measures'][meas]['rgb']  = rgb
+                elif not os.path.exists(os.path.join(subjdir, subj, specs['surfaces'][surf]['dir'], 'rh.{}'.format(surf))):
                     print('- Skipping ({}/{}): {}, {}, {} (missing {})'.format(v, num_views, subj, surf, meas, surf))
                     continue
-                elif not os.path.exists(os.path.join(subjdir, subj, specs['meas'][meas]['dir'], 'rh.{}'.format(meas))):
+                elif not os.path.exists(os.path.join(subjdir, subj, specs['measures'][meas]['dir'], 'rh.{}'.format(meas))):
                     print('- Skipping ({}/{}): {}, {}, {} (missing {})'.format(v, num_views, subj, surf, meas, meas))
                     continue
                 else:
                     print('- Working on ({}/{}): {}, {}, {}'.format(v, num_views, subj, surf, meas))
                     vtx, fac = load_surf(subjdir, subj, surf, specs)
-                    dat, rgb = load_data(subjdir, subj, meas, specs)
-                   
-                # Plot and save main fig and thumbnail
-                plot_fig(vtx, fac, dat, rgb, outdir, surf, meas, specs)
+                    dat, rgb = load_meas(subjdir, subj, meas, specs)
+                    if specs['measures'][meas]['cmap'] is None:
+                        specs['measures'][meas]['rgb'] = rgb
+                
+                # Plot and save histograms and corresponding thumbnails
+                if not os.path.exists(os.path.join(outdir,'thumbnails','hist_{}_bh.png'.format(meas))):
+                    nbins = 150
+                    plot_hist(dat, nbins, outdir, meas, specs)
+                
+                # Plot and save views and corresponding thumbnails
+                plot_view(vtx, fac, dat, outdir, surf, meas, specs)
                 
     # For each combination of surfaces and meshes, make an HTML file
     if args.htmldir is not None and args.htmldir != '':

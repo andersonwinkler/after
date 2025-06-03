@@ -313,9 +313,9 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 fi
 
 # Do the computation of better curvatures
-if ${DOCURVATURES} || ${DOALL} ; then
-   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
-fi
+#if ${DOCURVATURES} || ${DOALL} ; then
+#   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+#fi
 
 # Make nice figures and histograms for inspection
 if ${DOVIEWS} || ${DOALL} ; then

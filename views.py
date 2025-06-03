@@ -188,40 +188,14 @@ def lab2fac(lab, fac): # ======================================================
     newlab[idx2,0] = labf[idx2,2] # vtx3 has the final say
     return newlab
 
-def plot_view(vtx, fac, dat, outdir, mesh, meas, specs): # ================
+def plot_views(vtx, fac, dat, outdir, mesh, meas, specs): # ================
     '''
     Plot views.
     '''
-    # Define colormaps and color limits for edge cases.
-    # All others come from the specs variable
-    # dlim (data limit) isn't used in this function but kept for clarity and
-    # future reuse
-    if meas not in specs['measures']:
-        specs['measures'][meas] = {}
-    if 'dir' not in specs['measures'][meas]:
-        specs['measures'][meas]['dir'] = 'after'
-    if 'dlim' not in specs['measures'][meas]:
-        dmin = np.min(dat['bh'])
-        dmax = np.max(dat['bh'])
-        if dmin*dmax < 0:
-            mx = max(abs(dmin),abs(dmax))
-            dlim = [-mx, mx]
-        else:
-            dlim = [dmin, dmax]
-        specs['measures'][meas]['dlim'] = dlim
-    if 'clim' not in specs['measures'][meas]:
-        specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
-    if 'cmap' not in specs['measures'][meas]:
-        prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
-        if prod < 0:
-            cmap = 'bwr'
-        else:
-            cmap = 'viridis'
-        specs['measures'][meas]['cmap'] = cmap
     
     # Prepare the colormap
     if 'rgb' in specs['measures'][meas]:
-        rgb = specs['measures'][meas]['rgb'] / 255.0
+        rgb  = specs['measures'][meas]['rgb'] / 255.0
         cmap = mcolors.LinearSegmentedColormap.from_list('', rgb)
     else:
         cmap = specs['measures'][meas]['cmap']
@@ -231,7 +205,7 @@ def plot_view(vtx, fac, dat, outdir, mesh, meas, specs): # ================
     mesh = {}
     for h in ['lh','rh','bh']:
         mesh[h] = pv.PolyData(vtx[h], fac[h])
-        mesh[h]['scalars'] = dat[h][:,None]
+        mesh[h]['scalars'] = dat[h][:,None].copy() # PyVista has a bug and if we don't copy, it will sometimes alter the original data
     
     # Plot each view
     for view in specs['views']:
@@ -260,44 +234,27 @@ def plot_view(vtx, fac, dat, outdir, mesh, meas, specs): # ================
         gc.collect()
 
 def plot_hist(dat, cbins, outdir, meas, specs): # =============================
-    # Define colormaps and color limits for edge cases.
-    # All others come from the specs variable
-    if meas not in specs['measures']:
-        specs['measures'][meas] = {}
-    if 'dir' not in specs['measures'][meas]:
-        specs['measures'][meas]['dir'] = 'after'
-    if 'dlim' not in specs['measures'][meas]:
-        dmin = np.min(dat['bh'])
-        dmax = np.max(dat['bh'])
-        if dmin*dmax < 0:
-            mx = max(abs(dmin),abs(dmax))
-            dlim = [-mx, mx]
-        else:
-            dlim = [dmin, dmax]
-        specs['measures'][meas]['dlim'] = dlim
-    if 'clim' not in specs['measures'][meas]:
-        specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
-    if 'cmap' not in specs['measures'][meas]:
-        prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
-        if prod < 0:
-            cmap = 'bwr'
-        else:
-            cmap = 'viridis'
-        specs['measures'][meas]['cmap'] = cmap
+    '''
+    Plot histogram.
+    '''
+    
+    # Figure background color
+    bg_color = (0.85, 0.85, 0.85)
     
     # Prepare the colormap
     if 'rgb' in specs['measures'][meas]:
         rgb    = specs['measures'][meas]['rgb'] / 255.0
         cmap   = mcolors.LinearSegmentedColormap.from_list('', rgb)
         dlim   = [0, rgb.shape[0]]
+        clim   = specs['measures'][meas]['clim']
         dbins  = rgb.shape[0]
     else:
         cmap   = plt.colormaps[specs['measures'][meas]['cmap']]
         dlim   = specs['measures'][meas]['dlim']
-        deltad = specs['measures'][meas]['dlim'][1] - specs['measures'][meas]['dlim'][0]
-        deltac = specs['measures'][meas]['clim'][1] - specs['measures'][meas]['clim'][0]
+        clim   = specs['measures'][meas]['clim']
+        deltad = dlim[1] - dlim[0]
+        deltac = clim[1] - clim[0]
         dbins  = int(np.ceil(cbins * deltad / deltac))
-    clim = specs['measures'][meas]['clim']
     
     # For each hemisphere
     for h in ['lh', 'rh', 'bh']:
@@ -310,45 +267,47 @@ def plot_hist(dat, cbins, outdir, meas, specs): # =============================
         counts, bin_edges = np.histogram(dat[h], bins=dbins, range=dlim)
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
         
-        # Handle coloring based on whether we have RGB array or continuous colormap
+        # Coloring based on whether we have RGB array or continuous colormap
         if 'rgb' in specs['measures'][meas]:
-            # For RGB array: dat[h] contains integers corresponding to RGB rows
-            # Create colors for each bin based on the integer values
+            # dat[h] now contains integers corresponding to rgb rows
+            # Create colors for each bin based on the row numbers
             bar_colors = []
             for center in bin_centers:
-                # Find the closest integer (which corresponds to RGB row index)
+                # Find the closest integer (which corresponds to rgb row index)
                 idx = int(np.round(center))
                 # Ensure index is within bounds
                 idx = np.clip(idx, 0, len(rgb) - 1)
                 bar_colors.append(rgb[idx])
             bar_colors = np.array(bar_colors)
         else:
-            # For continuous colormap: use the existing clamping approach
+            # For continuous colormap
             norm = Normalize(vmin=clim[0], vmax=clim[1], clip=False)
             bar_colors = cmap(norm(bin_centers))
         
         # Main figure
-        fig = plt.figure(figsize=(20, 20))  # 2000x2000 pixels at 100 DPI
+        fig = plt.figure(figsize=(20, 20), facecolor=bg_color)  # 2000x2000 pixels at 100 DPI
         plot_width  = 0.6   # 60% of figure width for 4:3 ratio
         plot_height = 0.45  # 45% of figure height for 4:3 ratio
         left   = (1 - plot_width) / 2
         bottom = (1 - plot_height) / 2
         ax = fig.add_axes([left, bottom, plot_width, plot_height])
+        ax.set_facecolor(bg_color)
         ax.bar(bin_centers, counts, width=np.diff(bin_edges), color=bar_colors)
         ax.set_xlim(dlim[0], dlim[1])
         ax.set_xlabel(meas)
         ax.set_ylabel('Frequency')
         plt.savefig(os.path.join(outdir, 'hist_{}_{}.png'.format(meas, h)),
-                    dpi=100, facecolor='white', edgecolor='none')
+                    dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig)
         
         # Thumbnail
-        fig_thumb = plt.figure(figsize=(2, 2))  # 200x200 pixels at 100 DPI
+        fig_thumb = plt.figure(figsize=(2, 2), facecolor=bg_color)  # 200x200 pixels at 100 DPI
         plot_width  = 0.96  # 96% of figure width for 4:3 ratio
         plot_height = 0.72  # 72% of figure height for 4:3 ratio
         left   = (1 - plot_width) / 2
         bottom = (1 - plot_height) / 2
         ax_thumb = fig_thumb.add_axes([left, bottom, plot_width, plot_height])
+        ax.set_facecolor(bg_color)
         ax_thumb.bar(bin_centers, counts, width=np.diff(bin_edges), color=bar_colors)
         ax_thumb.set_xlim(dlim[0], dlim[1])
         ax_thumb.set_xticks([])
@@ -359,7 +318,7 @@ def plot_hist(dat, cbins, outdir, meas, specs): # =============================
         ax_thumb.spines['left'].set_visible(False)
         plt.figure(fig_thumb.number)  # Ensure we're saving the thumbnail figure
         plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}.png'.format(meas, h)),
-                    dpi=100, facecolor='white', edgecolor='none')
+                    dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig_thumb)
         
 def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
@@ -491,14 +450,38 @@ if __name__ == "__main__":
                     if specs['measures'][meas]['cmap'] is None:
                         specs['measures'][meas]['rgb'] = rgb
                 
+                # Define colormaps and color limits for edge cases.
+                # All others come from the specs variable
+                if meas not in specs['measures']:
+                    specs['measures'][meas] = {}
+                if 'dir' not in specs['measures'][meas]:
+                    specs['measures'][meas]['dir'] = 'after'
+                if 'dlim' not in specs['measures'][meas]:
+                    dmin = np.min(dat['bh'])
+                    dmax = np.max(dat['bh'])
+                    if dmin*dmax < 0:
+                        mx = max(abs(dmin),abs(dmax))
+                        dlim = [-mx, mx]
+                    else:
+                        dlim = [dmin, dmax]
+                    specs['measures'][meas]['dlim'] = dlim
+                if 'clim' not in specs['measures'][meas]:
+                    specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
+                if 'cmap' not in specs['measures'][meas]:
+                    prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
+                    if prod < 0:
+                        specs['measures'][meas]['cmap'] = 'bwr'
+                    else:
+                        specs['measures'][meas]['cmap'] = 'viridis'
+
+                # Plot and save views and corresponding thumbnails
+                plot_views(vtx, fac, dat, outdir, surf, meas, specs)
+
                 # Plot and save histograms and corresponding thumbnails
                 if not os.path.exists(os.path.join(outdir,'thumbnails','hist_{}_bh.png'.format(meas))):
                     nbins = 150
                     plot_hist(dat, nbins, outdir, meas, specs)
-                
-                # Plot and save views and corresponding thumbnails
-                plot_view(vtx, fac, dat, outdir, surf, meas, specs)
-                
+
     # For each combination of surfaces and meshes, make an HTML file
     if args.htmldir is not None and args.htmldir != '':
         for surf in surflist:

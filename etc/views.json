@@ -37,7 +37,7 @@
     "k2":      {"dir": "after/curvs", "dlim": [-1.0, 1.0],   "cmap": "bwr",    "clim": [-0.75, 0.75]},
     "K":       {"dir": "after/curvs", "dlim": [-0.25, 0.25], "cmap": "bwr",    "clim": [-0.1, 0.1]},
     "H":       {"dir": "after/curvs", "dlim": [-0.75, 0.75], "cmap": "bwr",    "clim": [-0.5, 0.5]},
-    "GLN":     {"dir": "after/curvs", "dlim": [0, 0.02],     "cmap": "spring", "clim": [0, 0.01]},
+    "GLN":     {"dir": "after/curvs", "dlim": [0, 0.010],    "cmap": "spring", "clim": [0, 0.005]},
     "AICI":    {"dir": "after/curvs", "dlim": [0, 0.20],     "cmap": "spring", "clim": [0, 0.15]},
     "SK2SK":   {"dir": "after/curvs", "dlim": [0, 0.20],     "cmap": "spring", "clim": [0, 0.15]},
     "MLN":     {"dir": "after/curvs", "dlim": [0, 0.20],     "cmap": "spring", "clim": [0, 0.15]},

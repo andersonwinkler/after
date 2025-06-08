@@ -1,0 +1,136 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Sep 16 14:11:57 2024
+
+@author: winkleram
+"""
+
+import os
+import argparse
+import numpy as np
+
+import lib
+
+if __name__ == '__main__':
+
+    # Argument parser
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Retessellate surfaces to a common grid. ' + \
+                        'Invoke either with --subj (and optionally --subjdir and --srf) ' + \
+                        'or with --srfsph, --trgsph, --srcsrf, and --trgsrf. ' + \
+                        'In the latter case, the paths to the files must be specified.',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
+    # Options to call specifying a subject
+    parser.add_argument('--subj',
+                        help='List of subjects separated by commas',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subjdir',
+                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--srf',
+                        help='Surface to retessellate, if invoked with "--subj" (default: orig)',
+                        type=str, required=False, default='orig')
+    # Options to call with specific files
+    parser.add_argument('--srcsph',
+                        help='Source sphere (typically subj/surf/?h.sphere.reg)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--trgsph',
+                        help='Target sphere (typically fsaverage/surf/?h.sphere.reg)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--srcsrf',
+                        help='Source surface (typically subj/surf/?h.white)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--trgsrf',
+                        help='Target surface (typically subj/after/?h.white.retess), to be created',
+                        type=str, required=False, default=None)
+    # Show a nice progress bar (only use in interactive sessions)
+    parser.add_argument('--progress',
+                        help='Show a progress bar',
+                        action='store_true', required=False, default=False)
+
+    # Parsing proper
+    args     = parser.parse_args()
+    subj     = args.subj
+    subjdir  = args.subjdir
+    srf      = args.srf
+    srcsph   = args.srcsph
+    trgsph   = args.trgsph
+    srcsrf   = args.srcsrf
+    trgsrf   = args.trgsrf
+    progress = args.progress
+    
+    # Check whether we are using a default FS subject structure, or isolated, custom files
+    customargs = [srcsph, trgsph, srcsrf, trgsrf]
+    if subj is None and None in customargs:
+        raise SyntaxError('Either "--subj" or all of "--srcsph", "--trgsph", "--srcsrf" and "--trgsrf" must be provided.')
+    if subj is not None and not None in customargs:
+        raise SyntaxError('Cannot use "--subj" together with "--srcsph", "--trgsph", "--srcsrf" or "--trgsrf".')
+    
+    # If a list of subjects was provided, let's use it
+    if subj is not None:
+        # Find SUBJECTS_DIR
+        if subjdir is None:
+            subjdir = os.getenv('SUBJECTS_DIR')
+        if subjdir == '' or subjdir is None:
+            raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
+        
+        # Find fsaverage
+        fshome = os.getenv('FREESURFER_HOME')
+        if os.path.exists(os.path.join(subjdir, 'fsaverage')):
+            fsavgdir = os.path.join(subjdir, 'fsaverage')
+        elif fshome is not None and fshome != '' and os.path.exists(os.path.join(fshome, 'subjects', 'fsaverage')):
+            fsavgdir = os.path.join(fshome, 'subjects', 'fsaverage')
+        else:
+            raise FileNotFoundError('"fsaverage" not found; make sure it exists in the subjects directory or that FreeSurfer is correctly installed')
+    
+        # Make a list of subjects
+        subjlist = subj.split(',')   
+        H = ['lh', 'rh']
+    else:
+        subjlist = [None]
+        H = [None]
+        
+    # For each subject and each hemisphere
+    for subj in subjlist:
+        for h in H:
+            if subj is None or h is None:
+                path1 = srcsph
+                path2 = trgsph
+                path3 = srcsrf
+                path4 = trgsrf
+            else:
+                os.makedirs(os.path.join(subjdir, subj, 'after'), exist_ok=True)
+                path1 = os.path.join(subjdir, subj, 'surf',  '{}.sphere.reg'.format(h))
+                path2 = os.path.join(fsavgdir,      'surf',  '{}.sphere.reg'.format(h))
+                path3 = os.path.join(subjdir, subj, 'surf',  '{}.{}'.format(h, srf))
+                path4 = os.path.join(subjdir, subj, 'after', '{}.{}.retess'.format(h, srf))
+            
+            # Check if the first three paths exist.
+            if not os.path.exists(path1):
+                raise FileNotFoundError('File does not exist: {}'.format(path1))
+            if not os.path.exists(path2):
+                raise FileNotFoundError('File does not exist: {}'.format(path2))
+            if not os.path.exists(path3):
+                raise FileNotFoundError('File does not exist: {}'.format(path3))
+        
+            # Load the surfaces using nibabel for FreeSurfer formats
+            # Will use the vertex coordinates as stored, which is equivalent to
+            # converting to RAS in this case. For other operations that require
+            # the RAS coordinates, these can be obtained with vtx = vtx + info['cras']
+            vtx1, fac1, _, _ = lib.io.read_surf(path1)
+            vtx2, fac2, _, _ = lib.io.read_surf(path2)
+            vtx3, fac3, info3, stamp3 = lib.io.read_surf(path3)
+            
+            # Sanity check
+            if not np.array_equal(fac1, fac3):
+                raise ValueError("The source surface and the surface to be retessellated must have the same geometry.")
+
+            # Do the retessellation proper
+            vtx4 = lib.surf.retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=progress)
+
+            # Save output surface
+            print('Saving results to: {}'.format(path4))
+            lib.io.write_surf(path4, vtx4, fac2, info3, stamp=True)

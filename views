@@ -14,11 +14,12 @@ import matplotlib.colors as mcolors
 import nibabel as nib
 from PIL import Image
 import gc
-from lib.io import read_surf, read_curv, read_annot, read_json
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from matplotlib.colors import Normalize
+
+import lib
 
 def load_surf(subjdir, sub, surf, specs=None): # ==============================
     '''
@@ -74,7 +75,7 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
     vtx = {}
     fac = {}
     for h in ['lh', 'rh']:
-        vtx[h], fac[h], _, _  = read_surf(surfname[h])
+        vtx[h], fac[h], _, _  = lib.io.read_surf(surfname[h])
     
     # Shift coords a bit for inflated or sphere
     if 'inflated' in surf or 'sphere' in surf:
@@ -146,12 +147,12 @@ def load_meas(subjdir, sub, meas, specs=None): # ==============================
         rgb = None
     elif meas.endswith('annot'):
         for h in ['lh', 'rh']:
-            lab, ctab, _ = read_annot(measname[h])
+            lab, ctab, _ = lib.io.read_annot(measname[h])
             dat[h] = lab2fac(lab, fac[h])
         rgb = ctab[:,0:3]
     else:
         for h in ['lh', 'rh']:
-            dat[h] = read_curv(measname[h])
+            dat[h] = lib.io.read_curv(measname[h])
         rgb = None
     
     # Create "both" hemispheres
@@ -391,7 +392,7 @@ if __name__ == "__main__":
         subjlist = args.subj.split(',')
     
     # Load locations, colors, and view schemes from a file
-    specs = read_json(os.path.join(os.path.dirname(__file__), 'etc', 'views.json'))
+    specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'views.json'))
     
     # Surfaces and measures to plot
     surflist = []

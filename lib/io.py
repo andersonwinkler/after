@@ -11,6 +11,7 @@ import numpy as np
 import nibabel as nib
 import json
 
+# =============================================================================
 def read_surf(filein):
     '''
     Read a FreeSurfer geometry file.
@@ -18,26 +19,31 @@ def read_surf(filein):
     vtx, fac, info, stamp = nib.freesurfer.read_geometry(filein, read_metadata=True, read_stamp=True)
     return vtx, fac, info, stamp
 
+# -----------------------------------------------------------------------------
 def write_surf(fileout, vtx, fac, info, stamp=True):
     '''
     Write a FreeSurfer geometry file.
     '''
     nib.freesurfer.write_geometry(fileout, vtx, fac, volume_info=info, create_stamp=True)
     
+# =============================================================================
 def read_mgh():
     ... # XXX to do
     return
 
+# -----------------------------------------------------------------------------
 def write_mgh(fileout, data, affine=None):
     if affine is None:
         affine = np.eye(4)
     mgh = nib.MGHImage(data, affine)
     nib.save(mgh, fileout)
 
+# =============================================================================
 def read_annot(filein, orig_ids=False):
     labels, ctab, names = nib.freesurfer.io.read_annot(filein, orig_ids=orig_ids)
     return labels, ctab, names
 
+# =============================================================================
 def read_curv(filein, use_ascii=False):
     if use_ascii:
         ...
@@ -45,6 +51,7 @@ def read_curv(filein, use_ascii=False):
         curv = nib.freesurfer.io.read_morph_data(filein)
     return curv
 
+# -----------------------------------------------------------------------------
 def write_curv(fileout, curv, vec=None, use_ascii=False): # ===================
     '''
     Write a FreeSurfer curvature file.
@@ -87,6 +94,7 @@ def read_json(jsonfile):
         J = json.load(fp)
     return J
 
+# -----------------------------------------------------------------------------
 def write_json(jsonfile, J, epoch=None): 
     """Write a dict to json file."""
     with open(jsonfile, 'w') as fp:

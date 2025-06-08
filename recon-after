@@ -11,33 +11,54 @@ ${0##*/} --subj <subject ID> [options]
 Options:
 
 --subj <subject ID>
-  Specify the subject ID. Must exist in the SUBJECTS_DIR directory.
+  Specify the subject ID. Must exist in the subjects directory.
 
 --sd <subjects directory>
-  Specify the subjects directory if not SUBJECTS_DIR.
+  Specify the subjects directory if not the one defined by the environmental
+  variable SUBJECTS_DIR.
+  Note that either SUBJECTS_DIR must have been correctly set, --sd must be
+  provided with the path to the directory that contains all subjects.
+  
+--sdnew <subjects directory>
+  Instead of overwriting the original data, store in a different
+  subjects directory. If this directory does not exist, an attempt will
+  be made to create it.
 
 --all
   Do everything.
 
 --retessellate
-  Do the retessellation to fsaverage.
+  Do the retessellation to fsaverage. Data must have been processed with
+  recon-all up to the point where the surface registration is performed
+  (?h.sphere.reg must exist).
 
 --curvatures
-  Compute curvatures and their composites.
+  Compute various curvature metrics and their composites. The ?h.white
+  and ?h.pial surfaces must exist.
+  
+--lgi
+  Compute the local gyrification index (following Schaer et al., 2008).
+  
+--fd
+  Compute the fractal dimension.
+  
+--myelin
+  Compute proxy measures for myelin based on T2 or FLAIR either of these
+  modalities were originally imported with the options --T2 or --FLAIR in
+  recon-all. It is not necessary that the flags --T2pial or --FLAIR pial were
+  originally used.
+  
+--subseg
+  Run scripts that do subsegmentation of amygala, thalamys, hippocampus.
+  
+--pve
+  Compute measures of partial volume effects of GM, WM, and CSF for subcortical
+  structures. If --subseg was used, will compute partial volume effects also for
+  subsegmented structures.
   
 --views
   Capture orthogonal views of surfaces and overlays, useful for quick
   inspection. These can be used to create an HTML file (see documentation).
-
---revert
-  Revert from the last backup if it exists thus deleting current FS results.
-  All other options will be ignored except --subj and (if provided) --sd.
-
---nobackup
-  Do not backup original outputs from recon-all, such that ${0##*/} will
-  overwrite those outputs. Cannot be reversed; if a failure occurs, it will
-  be necessary to run recon-all from scratch. Use only if you don't mind
-  risking losing data or have limited storage space.
 
 --progress
   Show a progress bar in longer steps. Avoid if running in a cluster
@@ -45,11 +66,6 @@ Options:
 
 Requirements:
 * FreeSurfer must be installed and configured properly.
-* For --retessellate, the subject must have been processed with recon-all up
-  to the point where the surface registration is performed (?h.sphere.reg must
-  exist).
-* Either SUBJECTS_DIR must have been correctly set, or the option --sd must
-  be provided with the path to the directory that contains all subjects.
 
 _____________________________________
 Anderson M. Winkler
@@ -60,6 +76,11 @@ EOU
 exit 1
 fi
 
+# Stop on crashes
+set -e # Stop immediately if an error happens
+set -u # Let's be sure all variables have been declared; crash otherwise
+
+# =====================================================================
 check_fs() {
    # Check if the last run of recon-all was successful
    if [[ -f ${SUBJECTS_DIR}/${subj}/scripts/recon-all-status.log ]] ; then
@@ -85,12 +106,39 @@ check_fs() {
    echo "${result[@]}"
 }
 
+# =====================================================================
+checkfiles() {
+   # Confirm that FS has run successfully up to the stage we need; if not, inform the user about the missing files
+   # Note we don't care here if recon-all.log shows last a failed run. As long as these files exist, we are ok to proceed.
+   FILELIST=${1}
+   MISSING=()
+   for f in "${FILELIST[@]}" ; do
+      if [[ ! -f "${f}" ]] ; then
+         MISSING+=("${f}")
+      fi
+   done
+   if [[ ! -z ${MISSING} ]] ; then
+      echo "Error: Previous call to FreeSurfer did not run up to the stage needed to allow ${2}."
+      echo "Make sure all steps at least up to surface registration (up to -surfreg) have been executed successfully."
+      echo "The missing files are:"
+      for f in "${MISSING[@]}" ; do
+         echo "- ${f}"
+      done
+      exit 1
+   fi
+}
+
+# =====================================================================
 # Some default variables, will be modified later
-DOBACKUP=true           # Do backup by default, so we can revert if needed
-DOREVERT=false          # Revert from the backup
+NEW_SUBJECTS_DIR=""     # New subjects dir to store outputs. Will be replaced below.
 DOALL=false             # Do everything
 DORETESSELLATE=false    # Do the retessellation
 DOCURVATURES=false      # Compute the better curvatures and their composites
+DOLGI=false             # Compute the LGI
+DOFRACTAL=false         # Compute the fractal dimension
+DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
+DOSUBSEG=false          # Run substructure segmentations
+DOPVE=false             # Compute partial volume effects
 DOVIEWS=false           # Capture views for later inspection
 PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
 
@@ -106,6 +154,10 @@ while [[ ${#} -gt 0 ]] ; do
       SUBJECTS_DIR="${2}"
       shift 2
       ;;
+   -sdnew|--sdnew)
+      NEW_SUBJECTS_DIR="${2}"
+      shift 2
+      ;;
    -all|--all)
       DOALL=true
       shift
@@ -118,16 +170,20 @@ while [[ ${#} -gt 0 ]] ; do
       DOCURVATURES=true
       shift
       ;;
+   -lgi|--lgi|-localGI|--localGI)
+      DOLGI=true
+      shift
+      ;;
+   -fd|--fd|-fractal|--fractal)
+      DOFRACTAL=true
+      shift
+      ;;
+   -myelin|--myelin)
+      DOMYELIN=true
+      shift
+      ;;
    -views|--views)
       DOVIEWS=true
-      shift
-      ;;
-   -revert|--revert)
-      DOREVERT=true
-      shift
-      ;;
-   -nobackup|--nobackup)
-      DOBACKUP=false
       shift
       ;;
    -progress|--progress)
@@ -141,99 +197,39 @@ while [[ ${#} -gt 0 ]] ; do
    esac
 done
 
-# Make sure we have a valid SUBJECTS_DIR
-if [[ -z "${SUBJECTS_DIR}" ]] || [[ ! -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
-   echo "Error: SUBJECTS_DIR variable not set or path provided with --sd is invalid."
-fi
-
-# Revert from the backup and exit
-if ${DOREVERT} ; then
-   echo "Will revert from previous backup for subject ${SUBJECTS_DIR}/${subj}. All other options will be ignored."
-   ALLGOOD=true
-   for dir in label mri scripts stats surf tmp touch trash ; do
-      [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
-   done
-   if ${ALLGOOD} ; then
-      for dir in label mri scripts stats surf tmp touch trash ; do
-         echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
-         rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
-         echo "- Reverting ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} to ${SUBJECTS_DIR}/${subj}"
-         mv ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
-      done
-      echo "- Removing ${SUBJECTS_DIR}/${subj}/${dir} and any contents inside."
-      rm -rf ${SUBJECTS_DIR}/${subj}/fs.bak
-      exit 0
-   else
-      echo "Error: Backup in ${SUBJECTS_DIR}/${subj}/fs.bak appears incomplete. Cannot revert automatically. Aborting."
-      exit 1
-   fi
-fi
-
 # Confirm we have FreeSurfer available
 if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
    echo "Error: FreeSurfer not correctly configured. Aborting."
    exit 1
 fi
 
-# Confirm that FS has run successfully up to the stage we need; if not, inform the user about the missing file
-# Note we don't care here if recon-all.log shows last a failed run. As long as these files exist, we are ok to proceed.
-FILELIST=(
-   ${SUBJECTS_DIR}/${subj}/mri/brain.finalsurfs.mgz
-   ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-   ${SUBJECTS_DIR}/${subj}/surf/rh.orig
-   ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.lh.dat
-   ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.rh.dat
-   ${SUBJECTS_DIR}/${subj}/surf/lh.sphere.reg
-   ${SUBJECTS_DIR}/${subj}/surf/rh.sphere.reg )
-MISSING=()
-for f in "${FILELIST[@]}" ; do
-   if [[ ! -f "${f}" ]] ; then
-      MISSING+=("${f}")
-   fi
-done
-if [[ ! -z ${MISSING} ]] ; then
-   echo "Error: Previous call to FreeSurfer did not run up to the stage needed to allow ${0##*/}."
-   echo "Make sure all steps at least up to surface registration (up to -surfreg) have been executed successfully."
-   echo "The missing files are:"
-   for f in "${MISSING[@]}" ; do
-      echo "- ${f}"
-   done
-   exit 1
+# Make sure we have a valid SUBJECTS_DIR
+if [[ -z "${SUBJECTS_DIR}" ]] || [[ ! -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
+   echo "Error: SUBJECTS_DIR variable not set or path provided with --sd is invalid."
 fi
 
-# If this is the first run, move to a safe place, than bring back by copying, otherwise adapt accordingly
+# Make a copy into NEW_SUBJECTS_DIR and use it instead of the original SUBJECTS_DIR
+if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
+   NEW_SUBJECTS_DIR=$(readlink -f "${SUBJECTS_DIR}")
+   mkdir -p ${NEW_SUBJECTS_DIR}
+   cp -rp ${SUBJECTS_DIR}/${subj} ${NEW_SUBJECTS_DIR}/
+   export SUBJECTS_DIR=${NEW_SUBJECTS_DIR}
+fi
+
+# =====================================================================
+# Do the retessellation
 if ${DORETESSELLATE} || ${DOALL} ; then
-   if ${DOBACKUP} ; then
-      if [[ -e ${SUBJECTS_DIR}/${subj}/fs.bak ]] ; then
-         echo "Error: A backup already exists in ${SUBJECTS_DIR}/${subj}/fs.bak."
-         echo "To be able to run ${0##*/}, you need to remove or rename that backup. Aborting."
-         exit 1
-      else
-         echo "Moving previous FS outputs for ${subj} to ${SUBJECTS_DIR}/${subj}/fs.bak"
-         mkdir -p ${SUBJECTS_DIR}/${subj}/fs.bak
-         for dir in label mri scripts stats surf tmp touch trash ; do
-            mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/fs.bak/
-         done
-      fi
-      ALLGOOD=true
-      for dir in label mri scripts stats surf tmp touch trash ; do
-         [[ ! -d ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ]] && ALLGOOD=false
-      done
-      if ${ALLGOOD} ; then
-         echo "Making new copies from the backup; we will work on the copies; deleting previous copies if they exist."
-         for dir in label mri scripts stats surf tmp touch trash ; do
-            echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
-            rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
-            echo "- Copying ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} -> ${SUBJECTS_DIR}/${subj}/"
-            cp -rp ${SUBJECTS_DIR}/${subj}/fs.bak/${dir} ${SUBJECTS_DIR}/${subj}/
-         done
-      else
-         echo "Error: Backup failed. ${SUBJECTS_DIR}/${subj}/fs.bak does not contain all data needed. Aborting."
-         exit 1
-      fi
-   else
-      echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
-   fi
+
+   # Check we have all files needed for this step
+   FILELIST=(
+      ${SUBJECTS_DIR}/${subj}/mri/brain.finalsurfs.mgz
+      ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+      ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.lh.dat
+      ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.rh.dat
+      ${SUBJECTS_DIR}/${subj}/surf/lh.sphere.reg
+      ${SUBJECTS_DIR}/${subj}/surf/rh.sphere.reg )
+   checkfiles ${FILELIST} retesselation
 
    # Do the retessellation proper
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
@@ -242,8 +238,8 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    # Replace the existing ?h.orig for the retessellated
    if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
       [[ -f ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
-      mv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-      mv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+      cp -rpv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      cp -rpv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
    else
       echo "Retessellation failed. The expected output files were not both produced:"
       echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
@@ -252,15 +248,17 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    fi
 
    # If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
+   OPTS=""
    T2pial=false
    FLAIRpial=false
    [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2 ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz         ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2    ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2    ]] && T2pial=true
    [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz      ]] && FLAIRpial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
-   OPTS=""
    ${T2pial}    && OPTS="${OPTS} -T2pial"
    ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
 
@@ -310,16 +308,60 @@ if ${DORETESSELLATE} || ${DOALL} ; then
                      0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
       fi
    done
+   
+   # Compute distances and vectors indicating the repositioning done by FreeSurfer
+   # ...
 fi
 
+# =====================================================================
 # Do the computation of better curvatures
-#if ${DOCURVATURES} || ${DOALL} ; then
-#   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
-#fi
+if ${DOCURVATURES} || ${DOALL} ; then
 
+   # Check we have all files needed for this step
+   FILELIST=(
+      ${SUBJECTS_DIR}/${subj}/surf/lh.white
+      ${SUBJECTS_DIR}/${subj}/surf/rh.white
+      ${SUBJECTS_DIR}/${subj}/surf/lh.pial
+      ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
+   checkfiles ${FILELIST} "computation of curvatures"
+   
+   # Compute the curvatures
+   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white,pial --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+fi
+
+# =====================================================================
+# Do the local gyrification index
+if ${DOLGI} || ${DOALL} ; then
+
+   # Check we have all files needed for this step
+   FILELIST=(
+      ${SUBJECTS_DIR}/${subj}/surf/lh.pial
+      ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
+   checkfiles ${FILELIST} "computation of the LGI"
+
+   # Lets use our customized "getmatlab" which will point to Octave
+   export PATH=$(dirname "$(readlink -f "${0}")"):${PATH}
+
+   # Compute the LGI proper
+   ${FREESURFER_HOME}/bin/recon-all \
+     -s "${subj}" \
+     -sd "${SUBJECTS_DIR}" \
+     -localGI
+     
+   # Let's symlink into the curvs directory as it's a good place to keep it
+   for h in lh rh ; do 
+      ln -s ../../surf/${h}.pial_lgi ${SUBJECTS_DIR}/${subj}/after/curvs/
+   done
+fi
+
+# =====================================================================
 # Make nice figures and histograms for inspection
 if ${DOVIEWS} || ${DOALL} ; then
-   (${DOCURVATURES} || ${DOALL}) && OPTS="--curvatures"
+   OPTS=""
+   (${DOCURVATURES} || ${DOALL}) && OPTS="${OPTS} --curvatures"
+   (${DOLGI}        || ${DOALL}) && OPTS="${OPTS} --lgi"
+   (${DOFRACTAL}    || ${DOALL}) && OPTS="${OPTS} --fd"
+   (${DOMYELIN}     || ${DOALL}) && OPTS="${OPTS} --myelin"
    $(dirname "$(readlink -f "${0}")")/views.py --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi
 

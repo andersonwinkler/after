@@ -1,20 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Fri Mar  7 22:36:30 2025
+Created on Sat Jun  7 18:23:07 2025
 
-@author: winkleram
+@author: winkler
 """
 
-
-import os
-import argparse
 import numpy as np
-import time
-from lib.io import read_surf, read_obj, write_curv, write_mgh
-from lib.utils import progress_bar
+from . utils import progress_bar
 
-def calc_normals(vtx, fac): # =================================================
+# =============================================================================
+def calc_normals(vtx, fac):
     '''
     Compute vertex and face normals.
     Vertex normals use the Max et al. (1999) algorithm.
@@ -64,7 +60,8 @@ def calc_normals(vtx, fac): # =================================================
     fn  /= np.linalg.norm(fn, axis=1)[:,None]
     return vn, fn
 
-def signed_area(tri, rfn=None): # =============================================
+# =============================================================================
+def signed_area(tri, rfn=None):
     '''
     Compute the signed area of a triangle in relation to a reference normal.
     If the normals are parallel, area is positive; if antiparallel, negative.
@@ -98,55 +95,8 @@ def signed_area(tri, rfn=None): # =============================================
         area *= sgn
     return area, fn
 
-def line_intersection(A,B,C,D): # =============================================
-    '''
-    Compute the coordinates of the intersection between line segments AB and CD.
-    Returns also parameters s and t. If these are between 0 and 1, the intersection
-    is, respectively, within AB and CD.
-    Implementation based on:
-        * Vince J. Foundation Mathematics for Computer Science.
-          4th ed. Springer, 2024. Chapter 20, pp 417-419.
-
-    Parameters
-    ----------
-    A : NumPy array (N by 3)
-        Cartesian coordinates of point A.
-    B : NumPy array (N by 3)
-        Cartesian coordinates of point B.
-    C : NumPy array (N by 3)
-        Cartesian coordinates of point C.
-    D : NumPy array (N by 3)
-        Cartesian coordinates of point D.
-
-    Returns
-    -------
-    P : NumPy array (N by 3)
-        Cartesian coordinates of intersection point P.
-    '''
-    # Find the parameters s and t via least squares. This avoids having to figure
-    # out if there are dependent equations
-    N    = A.shape[0]
-    dat  = np.concatenate((A[:,0]-C[:,0],A[:,1]-C[:,1],A[:,2]-C[:,2])).reshape((N,3), order='F')
-    scol = np.concatenate((D[:,0]-C[:,0],D[:,1]-C[:,1],D[:,2]-C[:,2])).reshape((N,3), order='F')
-    tcol = np.concatenate((A[:,0]-B[:,0],A[:,1]-B[:,1],A[:,2]-B[:,2])).reshape((N,3), order='F')
-    des  = np.concatenate((scol[:,:,None], tcol[:,:,None]), axis=2)
-    st   = np.zeros((N,2)) # for the terms s and t of the parameterization
-    rnk  = np.zeros((N))
-    for p in range(A.shape[0]):
-        st[p], _, rnk[p], _ = np.linalg.lstsq(des[p,:,:], dat[p,:], rcond=None)
-    
-    # Mark parallel lines with None
-    st[rnk < 2] = None
-    
-    # Intersection point
-    # It can be computed using A, B and t, or using C, D, and s
-    # Results should be the same
-    #Pt = A + st[:,1,None]*(B-A)
-    #Ps = C + st[:,0,None]*(D-C)
-    P   = C + st[:,0,None]*(D-C)
-    return P, st[:,0], st[:,1]
-
-def calc_voronoi_areas(vtx, fac): # ===========================================
+# =============================================================================
+def calc_voronoi_areas(vtx, fac):
     '''
     Compute the Voronoi areas for each vertex and, within a face, for each
     vertex of that face.
@@ -309,34 +259,8 @@ def calc_voronoi_areas(vtx, fac): # ===========================================
     np.add.at(vorv, fac, vorf)
     return vorv, vorf, areaABC
 
-def calc_rot(n): # ============================================================
-    '''
-    Compute a 3x3 rotation matrix that changes the coordinate system such
-    that n @ rot is a new coordinate system with the z-axis along n.
-
-    Parameters
-    ----------
-    n : Input vector
-
-    Returns
-    -------
-    rot : Rotation matrix
-    '''
-    n     /= np.linalg.norm(n)
-    z      = np.array([0,0,1])
-    axis   = np.cross(z,n)
-    naxis  = np.linalg.norm(axis)
-    if naxis > 0:
-        axis  /= naxis
-    angle  = np.arccos(np.clip(np.dot(z,n),-1,1))
-    K = np.array([
-        [   0 ,    -axis[2],  axis[1]],
-        [ axis[2],       0 , -axis[0]],
-        [-axis[1],  axis[0],       0]])
-    rot    = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
-    return rot
-
-def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf): # ======================
+# =============================================================================
+def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
     Compute curvatures k1 and k2 following the algorithm proposed by
     Rusinkiewicz (2004), as well as the corresponding directions.
@@ -375,7 +299,7 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf): # ======================
     # Precompute transforms from the global to local coordinate system of each vertex
     rotv = np.zeros((3,3,nvtx))
     for v in range(nvtx):
-       rotv[:,:,v] = calc_rot(vtxn[v])
+       rotv[:,:,v] = normal2zaxis(vtxn[v])
     
     # Allocate space to store the Weingarten matrix for each vertex
     IIv = np.zeros((2,2,nvtx))
@@ -386,14 +310,13 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf): # ======================
     kd1 = np.zeros((nvtx,3))
     kd2 = np.zeros((nvtx,3))
 
-    # For each face
     start_time = time.time()
     for f in range(nfac):
         if progress:
             progress_bar(f, nfac, start_time, prefix='Processing faces:', min_update_interval=1)
             
         # Transformation from the global the local coordinate system of this face
-        rotf = calc_rot(facn[f])
+        rotf = normal2zaxis(facn[f])
 
         # Axes (uf,vf,wf) of the local face coordinate system
         uf = np.array([1,0,0])
@@ -502,7 +425,8 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf): # ======================
         # print(np.dot(kd1[v,:],vtxn[v,:]), np.dot(kd2[v,:],vtxn[v,:]))
     return {'k1':k1, 'k2':k2, 'kdir1':kd1, 'kdir2':kd2}
 
-def calc_composites(curvs): # ================================================
+# =============================================================================
+def calc_composites(curvs):
     
     # Gaussian curvature
     curvs['K']     = curvs['k1']*curvs['k2']
@@ -554,156 +478,137 @@ def calc_composites(curvs): # ================================================
     
     # Shape Index
     curvs['SI']    = 2*np.arctan((curvs['k1']+curvs['k2'])/(curvs['k1']-curvs['k2']))/np.pi
-
     return curvs
 
-if __name__ == "__main__":
+# =============================================================================
+def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
+    '''
+    Retessellate a mesh.
 
-    # Argument parser
-    parser = argparse.ArgumentParser(
-                        description=\
-                        'Compute various curvature indices. ' + \
-                        'Invoke either with --subj (and optionally --subjdir and --srf) ' + \
-                        'or with --in, --it, --out, and --ot. ' + \
-                        'In the latter case, the paths to the files must be specified.',
-                        epilog=\
-                        'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
-    # Options to call specifying a subject
-    parser.add_argument('--subj',
-                        help='List of subjects separated by commas',
-                        type=str, required=False, default=None)
-    parser.add_argument('--subjdir',
-                        help='Subjects directory (usually SUBJECTS_DIR)',
-                        type=str, required=False, default=None)
-    parser.add_argument('--srf',
-                        help='Surface to compute curvatures from, if invoked with "--subj" (default: white)',
-                        type=str, required=False, default='white')
-    # Options to call with specific files
-    parser.add_argument('--in', dest='filein',
-                        help="Input surface file",
-                        type=str, required=False, default=None)
-    parser.add_argument('--it', dest='intype',
-                        help="Input type (file format)",
-                        type=str, required=False, default='surf')
-    parser.add_argument('--outprefix', dest='outprefix',
-                        help="Prefix for output curvature files",
-                        type=str, required=False, default=None)
-    parser.add_argument('--ot', dest='outtype',
-                        help="Output type (file format)",
-                        type=str, required=False, default='curv')
-    # Show a nice progress bar (only use in interactive sessions)
-    parser.add_argument('--progress',
-                        help='Show a progress bar (avoid in headless systems)',
-                        action='store_true', required=False, default=False)
+    Parameters
+    ----------
+    vtx1 : NumPy array (num vertices by 3)
+        Vertex coordinates of the source sphere (typically ?h.sphere.reg).
+    fac1 : NumPy arrau (num faces by 3)
+        Face indicesindices of the source sphere (typically ?h.sphere.reg).
+    vtx2 : NumPy array (num vertices by 3
+        Vertex coordinates of the target sphere (typically ?h.sphere from fsaverage).
+    fac2 : NumPy arrau (num faces by 3)
+        Face indices of the target sphere (typically ?h.sphere from fsaverage).
+    vtx3 : NumPy array (num vertices by 3
+        Vertex coordinates of the mesh to be retessellated (e.g., ?h.white).
+    fac3 : NumPy arrau (num faces by 3)
+        Face indices of the mesh to be retessellated (e.g., ?h.white)
+    progress : bool, optional
+        Show a progress bar? The default is False.
+
+    Returns
+    -------
+    vtx4 : NumPy array (num vertices by 3)
+        Vertex coordinates of the retessellated mesh. Its face indices are fac2.
+
+    '''
+
+    # Default margin
+    marg =  0.05;
     
-    # Parsing proper
-    args      = parser.parse_args()
-    subj      = args.subj
-    subjdir   = args.subjdir
-    srf       = args.srf
-    filein    = args.filein
-    intype    = args.intype.lower()
-    outprefix = args.outprefix
-    outtype   = args.outtype.lower()
-    progress  = args.progress
+    nF1 = fac1.shape[0]
+    nV2 = vtx2.shape[0]
+
+    # Where the result is going to be stored
+    vtx4 = np.zeros((nV2, 3))
     
-    # Check whether we are using a default FS subject structure, or isolated, custom files
-    customargs = [filein, outprefix]
-    if subj is None and None in customargs:
-        raise SyntaxError('Either "--subj" or both "--in" and "--out" must be provided.')
-    if subj is not None and not None in customargs:
-        raise SyntaxError('Cannot use "--subj" together with "--in or "--outprefix".')
+    # Vertices' coords per face
+    facvtx1 = np.hstack((vtx1[fac1[:,0],:], vtx1[fac1[:,1],:], vtx1[fac1[:,2],:]))
     
-    # If a list of subjects was provided, let's use it
-    if subj is not None:
-        # Find SUBJECTS_DIR
-        if subjdir is None:
-            subjdir = os.getenv('SUBJECTS_DIR')
-        if subjdir == '' or subjdir is None:
-            raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
-        # Make a list of subjects
-        subjlist = subj.split(',')   
-        H = ['lh', 'rh']
-    else:
-        subjlist = [None]
-        H = [None]
+    # Face barycenter
+    xbary = np.mean(facvtx1[:, [0, 3, 6], None], axis=1)    # x-coordinate
+    ybary = np.mean(facvtx1[:, [1, 4, 7], None], axis=1)    # y-coordinate
+    zbary = np.mean(facvtx1[:, [2, 5, 8], None], axis=1)    # z-coordinate
+    cbary = np.hstack((xbary, ybary, zbary))                # Cartesian coordinates of the barycenters
+    r     = np.sqrt(xbary**2 + ybary**2 + zbary**2)         # radius
+    theta = np.arctan2(ybary, xbary)                        # azimuth (angle in x-y plane)
+    phi   = np.arctan2(zbary, np.sqrt(xbary**2 + ybary**2)) # elevation (angle from z-axis)
+    sbary = np.hstack((theta, phi, r))                      # Spherical coordinates of the barycenters
     
-    # For each subject and each hemisphere
-    for subj in subjlist:
-        for h in H:
-            # Read input file
-            if subj is None or h is None:
-                print('Reading input file: {}'.format(filein))
-                surfs = ('pial', 'white', 'inflated', 'sphere', 'sphere.reg', 'orig')
-                if intype == 'obj' or filein.lower().endswith('.obj'):
-                    obj = read_obj(filein)
-                    vtx = obj['v']
-                    fac = obj['f']
-                elif intype == 'surf' or filein.lower().endswith(surfs):
-                    vtx, fac, _, _ = read_surf(filein)
-            else:
-                filein = os.path.join(subjdir, subj, 'surf', '{}.{}'.format(h, srf))
-                print('Reading input file: {}'.format(filein))
-                vtx, fac, _, _ = read_surf(filein)
-                
-            # Compute vertex normals
-            print('Computing face and vertex normals using the Max (1999) algorithm')
-            vtxn, facn = calc_normals(vtx, fac)
-            
-            # Compute Voronoi areas
-            print('Computing Voronoi areas per vertex at each face using an inhouse algorithm')
-            vorv, vorf, areas = calc_voronoi_areas(vtx, fac)
+    # Pre-calculated sines and cosines of azimuth and elevation:
+    sinA = np.sin(sbary[:,0,None])
+    sinE = np.sin(sbary[:,1,None])
+    cosA = np.cos(sbary[:,0,None])
+    cosE = np.cos(sbary[:,1,None])
+    
+    # Pre-calculated rotation matrices
+    rotM = np.column_stack((cosA * cosE, sinA*cosE, sinE, -sinA, cosA, np.zeros(nF1), -cosA*sinE, -sinA*sinE, cosE))
+    
+    # Random angle around X
+    rndangX = np.random.rand() * np.pi
+    rndangX = np.pi/3
+    sinX = np.sin(rndangX)
+    cosX = np.cos(rndangX)
+    rotM = np.column_stack((
+        rotM[:,:3],  
+        rotM[:,3] * cosX + rotM[:,6] * sinX,
+        rotM[:,4] * cosX + rotM[:,7] * sinX,
+        rotM[:,5] * cosX + rotM[:,8] * sinX,
+        rotM[:,6] * cosX - rotM[:,3] * sinX,
+        rotM[:,7] * cosX - rotM[:,4] * sinX,
+        rotM[:,8] * cosX - rotM[:,5] * sinX 
+    ))
+    
+    # Pre-calculated min and max for each face and bounding box
+    minF = np.column_stack(( np.min(facvtx1[:, [0, 3, 6]], axis=1), np.min(facvtx1[:, [1, 4, 7]], axis=1), np.min(facvtx1[:, [2, 5, 8]], axis=1) ))
+    maxF = np.column_stack(( np.max(facvtx1[:, [0, 3, 6]], axis=1), np.max(facvtx1[:, [1, 4, 7]], axis=1), np.max(facvtx1[:, [2, 5, 8]], axis=1) ))
+    b    = np.tile(np.max((maxF - minF), axis=1).reshape(-1, 1), (1, 3)) * marg
+    minF = minF - b
+    maxF = maxF + b
+
+    # For each source face
+    start_time = time.time()
+    for f in range(nF1):
+        if progress:
+            progress_bar(f, nF1, start_time, prefix='Processing faces:', min_update_interval=1)
         
-            # Compute principal curvatures
-            print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')
-            curvs = calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf)
+        vidx = fac1[f, :]         # Indices of the vertices for face f
+        Fvtx = vtx1[vidx, :]      # Corresponding vertex coordinates from vtx1
+        
+        # Candidate vertices
+        Cidx = np.all((vtx2 >= minF[f, :]) & (vtx2 <= maxF[f, :]), axis=1)  # Logical condition across columns
+        Cvtx = vtx2[Cidx, :]  # Extract candidate vertices
+        Cidxi = np.where(Cidx)[0]  # Indices of the candidate vertices
+        
+        # Concatenate the face vertices and candidate vertices
+        Avtx = np.vstack((Fvtx, Cvtx)) @ rotM[f, :].reshape(3, 3).T
+
+        # Convert to azimuthal gnomonic
+        Gvtx = np.ones_like(Avtx)  # The 3rd col will remain full of ones
+        Gvtx[:, 0] = Avtx[:, 1] / Avtx[:, 0]  # Tangent of the angle on the XY plane
+        Gvtx[:, 1] = Avtx[:, 2] / Avtx[:, 0]  # Tangent of the angle on the XZ plane
+        T = Gvtx[:3, :] # Face coords for the test below
+        aT = np.linalg.det(T) # Face total area (2x the area, actually)
+        
+        # For every candidate vertex
+        for v in range(len(Cidxi)):
             
-            # Compute composite measures based on k1 and k2
-            print('Computing composite curvatures from the principal curvatures')
-            curvs = calc_composites(curvs)
+            # Compute the areas for the subtriangles (2x area actually)
+            # Subtriangle A
+            tA = T.copy()  # Copy the original T
+            tA[0, :] = Gvtx[v + 3, :]
+            aA = abs(np.linalg.det(tA))
             
-            # Include Voronoi areas in the set, so it's easier to save
-            curvs['varea'] = vorv
+            # Subtriangle B
+            tB = T.copy()
+            tB[1, :] = Gvtx[v + 3, :]
+            aB = abs(np.linalg.det(tB))
             
-            # Save results
-            if subj is None or h is None:
-                print('Saving results with prefix: {}'.format(outprefix))
-                if outtype in ['asc', 'dpv', 'curv']:
-                    # FreeSurfer curvature format (ASCII or not)
-                    for c in curvs:
-                        if   c == 'k1':
-                            dirs = curvs['kdir1']
-                        elif c == 'k2':
-                            dirs = curvs['kdir2']
-                        elif c in ['kdir1', 'kdir2']:
-                            continue
-                        else:
-                            dirs = None
-                        fileout = '{}.{}.{}'.format(outprefix, c, outtype)
-                        if args.outtype.lower() in ['asc', 'dpv']:
-                            write_curv(fileout, curvs[c], vectors=dirs, use_ascii=True)
-                        else:
-                            write_curv(fileout, curvs[c], vectors=dirs, use_ascii=False)
-                elif outtype in ['mgh', 'mgz']:
-                    # FreeSurfer voxelwise format (mgh/mgz)
-                    for c in curvs:
-                        fileout = '{}.{}.{}'.format(outprefix, c, outtype)
-                        if c in ['kdir1', 'kdir2']:
-                            continue
-                        write_mgh(fileout, np.asarray(curvs[c], dtype=np.float32).reshape(-1, 1, 1))
-            else:
-                outdir = os.path.join(subjdir, subj, 'after', 'curvs')
-                print('Saving results to directory: {}'.format(outdir))
-                os.makedirs(outdir, exist_ok=True)
-                for c in curvs:
-                    if   c == 'k1':
-                        dirs = curvs['kdir1']
-                    elif c == 'k2':
-                        dirs = curvs['kdir2']
-                    elif c in ['kdir1', 'kdir2']:
-                        continue
-                    else:
-                        dirs = None
-                    fileout = os.path.join(outdir, '{}.{}'.format(h, c))
-                    write_curv(fileout, curvs[c], vec=dirs, use_ascii=False)
-    print('Finished computing curvatures.')
+            # Subtriangle C
+            tC = T.copy()
+            tC[2, :] = Gvtx[v + 3, :]
+            aC = abs(np.linalg.det(tC))
+            
+            # Test if the point is inside the face
+            if np.float32(aT) == np.float32(aA + aB + aC): # Use float32 (single) to emulate Matlab. However, np.isclose would have been more pythonic
+            
+                # Weight by the areas and interpolate the value between the 3 vertices
+                vtx4[Cidxi[v], :] = np.dot([aA, aB, aC], vtx3[vidx, :]) / aT
+        
+    return vtx4

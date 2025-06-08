@@ -1,0 +1,99 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+cat <<EOU
+Create or restore a backup of data processed by FreeSurfer for a specified subject.
+
+Usage:
+
+${0##*/} --subj <subject ID> [options]
+
+Options:
+
+--subj <subject ID>
+  Specify the subject ID. Must exist in the SUBJECTS_DIR directory.
+
+--sd <subjects directory>
+  Specify the subjects directory if not SUBJECTS_DIR.
+
+--name <backup name>
+  Specify the name of the backup within a particular location.
+  If new backup is being created and no name is specified, it will be named
+  as 0, 1, 2, etc.
+  If data are being restored from an existing backup and no name is specified
+  the most recent backup will be used.
+  To determine the most recent 
+  
+--location <directory>
+  Specify where the location of the backup.
+  
+--restore
+  Restore data from existing named backup (specified with --name)
+  
+  
+_____________________________________
+Anderson M. Winkler
+University of Texas Rio Grande Valley
+Jun/2025
+https://brainder.org
+EOU
+exit 1
+fi
+
+if ${DOBACKUP} ; then
+   if [[ -e ${SUBJECTS_DIR}/${subj}/backup ]] ; then
+      echo "Error: A backup already exists in ${SUBJECTS_DIR}/${subj}/backup."
+      echo "To make a new backup, you need to remove or rename that backup. Aborting."
+      exit 1
+   else
+      echo "Moving previous FS outputs for ${subj} to ${SUBJECTS_DIR}/${subj}/backup"
+      mkdir -p ${SUBJECTS_DIR}/${subj}/backup
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         mv ${SUBJECTS_DIR}/${subj}/${dir} ${SUBJECTS_DIR}/${subj}/backup/
+      done
+   fi
+   ALLGOOD=true
+   for dir in label mri scripts stats surf tmp touch trash ; do
+      [[ ! -d ${SUBJECTS_DIR}/${subj}/backup/${dir} ]] && ALLGOOD=false
+   done
+   if ${ALLGOOD} ; then
+      echo "Making new copies from the backup; we will work on the copies; deleting previous copies if they exist."
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
+         rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
+         echo "- Copying ${SUBJECTS_DIR}/${subj}/backup/${dir} -> ${SUBJECTS_DIR}/${subj}/"
+         cp -rp ${SUBJECTS_DIR}/${subj}/backup/${dir} ${SUBJECTS_DIR}/${subj}/
+      done
+   else
+      echo "Error: Backup failed. ${SUBJECTS_DIR}/${subj}/backup does not contain all data needed. Aborting."
+      exit 1
+   fi
+else
+   echo "Warning: no backup will be made (option --nobackup was used). If the next steps fail, you will have to rerun recon-all."
+fi
+
+# Revert from the backup and exit
+if ${DOREVERT} ; then
+   echo "Will revert from previous backup for subject ${SUBJECTS_DIR}/${subj}. All other options will be ignored."
+   ALLGOOD=true
+   for dir in label mri scripts stats surf tmp touch trash ; do
+      [[ ! -d ${SUBJECTS_DIR}/${subj}/backup/${dir} ]] && ALLGOOD=false
+   done
+   if ${ALLGOOD} ; then
+      for dir in label mri scripts stats surf tmp touch trash ; do
+         echo "- Removing current ${SUBJECTS_DIR}/${subj}/${dir}"
+         rm -rf ${SUBJECTS_DIR}/${subj}/${dir}
+         echo "- Reverting ${SUBJECTS_DIR}/${subj}/backup/${dir} to ${SUBJECTS_DIR}/${subj}"
+         mv ${SUBJECTS_DIR}/${subj}/backup/${dir} ${SUBJECTS_DIR}/${subj}/
+      done
+      echo "- Removing ${SUBJECTS_DIR}/${subj}/${dir} and any contents inside."
+      rm -rf ${SUBJECTS_DIR}/${subj}/backup
+      exit 0
+   else
+      echo "Error: Backup in ${SUBJECTS_DIR}/${subj}/backup appears incomplete. Cannot revert automatically. Aborting."
+      exit 1
+   fi
+fi
+
+
+   

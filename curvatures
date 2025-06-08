@@ -1,0 +1,171 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar  7 22:36:30 2025
+
+@author: winkleram
+"""
+
+import os
+import argparse
+import numpy as np
+
+import lib
+
+if __name__ == "__main__":
+
+    # Argument parser
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Compute various curvature indices. ' + \
+                        'Invoke either with --subj (and optionally --subjdir and --srf) ' + \
+                        'or with --in, --it, --out, and --ot. ' + \
+                        'In the latter case, the paths to the files must be specified.',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
+    # Options to call specifying a subject
+    parser.add_argument('--subj',
+                        help='List of subjects separated by commas',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subjdir',
+                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--surf',
+                        help='Surfaces to compute curvatures from, if invoked with "--subj", separated by commas (default: white,pial)',
+                        type=str, required=False, default='white,pial')
+    # Options to call with specific files
+    parser.add_argument('--in', dest='filein',
+                        help="Input surface file",
+                        type=str, required=False, default=None)
+    parser.add_argument('--it', dest='intype',
+                        help="Input type (file format)",
+                        type=str, required=False, default='surf')
+    parser.add_argument('--outprefix', dest='outprefix',
+                        help="Prefix for output curvature files",
+                        type=str, required=False, default=None)
+    parser.add_argument('--ot', dest='outtype',
+                        help="Output type (file format)",
+                        type=str, required=False, default='curv')
+    # Show a nice progress bar (only use in interactive sessions)
+    parser.add_argument('--progress',
+                        help='Show a progress bar (avoid in headless systems)',
+                        action='store_true', required=False, default=False)
+    
+    # Parsing proper
+    args      = parser.parse_args()
+    subj      = args.subj
+    subjdir   = args.subjdir
+    surf      = args.surf
+    filein    = args.filein
+    intype    = args.intype.lower()
+    outprefix = args.outprefix
+    outtype   = args.outtype.lower()
+    progress  = args.progress
+    
+    # Check whether we are using a default FS subject structure, or isolated, custom files
+    customargs = [filein, outprefix]
+    if subj is None and None in customargs:
+        raise SyntaxError('Either "--subj" or both "--in" and "--out" must be provided.')
+    if subj is not None and not None in customargs:
+        raise SyntaxError('Cannot use "--subj" together with "--in or "--outprefix".')
+    
+    # If a list of subjects was provided, let's use it
+    if subj is None:
+        subjlist = [None]
+        H        = [None]
+    else:        
+        # Find SUBJECTS_DIR
+        if subjdir is None:
+            subjdir = os.getenv('SUBJECTS_DIR')
+        if subjdir == '' or subjdir is None:
+            raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
+        
+        # Make a list of subjects
+        subjlist = subj.split(',')   
+        H        = ['lh', 'rh']
+    
+    # Whether a subject is specified or not, the list of surfaces is defined similarly
+    surflist = surf.split(',')
+    
+    # For each subject and each hemisphere
+    for subj in subjlist:
+        for srf in surflist:
+            for h in H:
+                # Read input file
+                if subj is None or h is None:
+                    print('Reading input file: {}'.format(filein))
+                    knownsurfs = ('orig.premesh', 'orig', 'white.preaparc',
+                                  'smoothwm', 'inflated', 'sphere', 'sphere.reg',
+                                  'white', 'pial', 'midthickness')
+                    if intype == 'obj' or filein.lower().endswith('.obj'):
+                        obj = lib.io.read_obj(filein)
+                        vtx = obj['v']
+                        fac = obj['f']
+                    elif intype == 'surf' or filein.lower().endswith(knownsurfs):
+                        vtx, fac, _, _ = lib.io.read_surf(filein)
+                else:
+                    filein = os.path.join(subjdir, subj, 'surf', '{}.{}'.format(h, srf))
+                    print('Reading input file: {}'.format(filein))
+                    vtx, fac, _, _ = lib.io.read_surf(filein)
+                    
+                # Compute vertex normals
+                print('Computing face and vertex normals using the Max (1999) algorithm')
+                vtxn, facn = lib.surf.calc_normals(vtx, fac)
+                
+                # Compute Voronoi areas
+                print('Computing Voronoi areas per vertex at each face using an inhouse algorithm')
+                vorv, vorf, areas = lib.surf.calc_voronoi_areas(vtx, fac)
+            
+                # Compute principal curvatures
+                print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')
+                curvs = lib.surf.calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf)
+                
+                # Compute composite measures based on k1 and k2
+                print('Computing composite curvatures from the principal curvatures')
+                curvs = lib.surf.calc_composites(curvs)
+                
+                # Include Voronoi areas in the set, so it's easier to save
+                curvs['varea'] = vorv
+                
+                # Save results
+                if subj is None or h is None:
+                    print('Saving results with prefix: {}'.format(outprefix))
+                    if outtype in ['asc', 'dpv', 'curv']:
+                        # FreeSurfer curvature format (ASCII or not)
+                        for c in curvs:
+                            if   c == 'k1':
+                                dirs = curvs['kdir1']
+                            elif c == 'k2':
+                                dirs = curvs['kdir2']
+                            elif c in ['kdir1', 'kdir2']:
+                                continue
+                            else:
+                                dirs = None
+                            fileout = '{}.{}.{}'.format(outprefix, c, outtype)
+                            if args.outtype.lower() in ['asc', 'dpv']:
+                                lib.io.write_curv(fileout, curvs[c], vectors=dirs, use_ascii=True)
+                            else:
+                                lib.io.write_curv(fileout, curvs[c], vectors=dirs, use_ascii=False)
+                    elif outtype in ['mgh', 'mgz']:
+                        # FreeSurfer voxelwise format (mgh/mgz)
+                        for c in curvs:
+                            fileout = '{}.{}.{}'.format(outprefix, c, outtype)
+                            if c in ['kdir1', 'kdir2']:
+                                continue
+                            lib.io.write_mgh(fileout, np.asarray(curvs[c], dtype=np.float32).reshape(-1, 1, 1))
+                else:
+                    outdir = os.path.join(subjdir, subj, 'after', 'curvs')
+                    print('Saving results to directory: {}'.format(outdir))
+                    os.makedirs(outdir, exist_ok=True)
+                    for c in curvs:
+                        if   c == 'k1':
+                            dirs = curvs['kdir1']
+                        elif c == 'k2':
+                            dirs = curvs['kdir2']
+                        elif c in ['kdir1', 'kdir2']:
+                            continue
+                        else:
+                            dirs = None
+                        fileout = os.path.join(outdir, '{}.{}.{}'.format(h, srf, c))
+                        lib.io.write_curv(fileout, curvs[c], vec=dirs, use_ascii=False)
+    print('Finished computing curvatures.')

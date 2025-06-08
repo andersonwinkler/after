@@ -5,8 +5,10 @@ Created on Sat May 31 20:27:37 2025
 
 @author: winkler
 """
+
 import time
 
+# =============================================================================
 def progress_bar(current, total, start_time=None, bar_length=40, prefix='Progress:', 
                     update_frequency=0.01, min_update_interval=10):
     """

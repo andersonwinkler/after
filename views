@@ -360,6 +360,9 @@ if __name__ == "__main__":
     parser.add_argument('--subjdir',
                         help='Subjects directory (usually SUBJECTS_DIR)',
                         type=str, required=False, default=None)
+    parser.add_argument('--all',
+                        help='Process all subjects in SUBJECTS_DIR.',
+                        action='store_true', required=False, default=False)
     parser.add_argument('--nodefaults',
                         help='Do not make views for the default measures in the "label" and "surf" directories',
                         action='store_true', required=False, default=False)
@@ -379,9 +382,13 @@ if __name__ == "__main__":
         subjdir = os.getenv('SUBJECTS_DIR')
     if subjdir == '' or subjdir is None:
         raise ValueError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
-
+    if args.subj is None and not args.all:
+        raise ValueError('Must specify subjects or use --all')
+    if args.subj is not None and args.all:
+        raise ValueError('Cannot specify subjects and also use --all')
+    
     # Make a list of subjects
-    if args.subj is None or args.subj == '':
+    if args.all:
         tmp = sorted(glob.glob(subjdir + '/*'))
         subjlist = []
         for t in tmp:

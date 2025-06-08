@@ -1,0 +1,60 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Jun 07 23:09:18 2025
+
+@author: winkleram
+"""
+
+import os
+import argparse
+import numpy as np
+
+import lib
+
+if __name__ == '__main__':
+
+    # Argument parser
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Compute vertexwise distances between two surfaces with same geometry. ' + \
+                        'Results are saved in FreeSurfer "curvature" format as well as ASCII (.dpv), ' + \
+                        'the latter containing the displacement vectors.',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / Jun 2025 / https://brainder.org')
+    parser.add_argument('--ref',
+                        help='Reference surface; displacement vectors will be computed in relation to this surface.',
+                        type=str, required=False, default=None)
+    parser.add_argument('--mov',
+                        help='Moving surface; displacement vectors will be computed the reference to this.',
+                        type=str, required=False, default=None)
+    parser.add_argument('--out',
+                        help='Output file (FreeSurfer "curvature" format).',
+                        type=str, required=False, default=None)
+    args  = parser.parse_args()
+    
+    # Check if the first three paths exist.
+    if not os.path.exists(args.ref):
+        raise FileNotFoundError('File does not exist: {}'.format(args.ref))
+    if not os.path.exists(args.mov):
+        raise FileNotFoundError('File does not exist: {}'.format(args.mov))
+
+    # Load the surfaces using nibabel for FreeSurfer formats
+    vtx1, fac1, info1, _ = lib.io.read_surf(args.ref)
+    vtx2, fac2, info2, _ = lib.io.read_surf(args.mov)
+
+    # Sanity check
+    if not np.array_equal(vtx1.shape, vtx2.shape):
+        raise ValueError("The reference and moving surfaces must have the same geometry.")
+
+    # Let's put in FS coordinate system
+    vtx1 = vtx1 + info1['cras']
+    vtx2 = vtx2 + info2['cras']
+
+    # Compute the distances
+    vec = vtx2 - vtx1
+    dist = np.sum(vec**2, axis=1)
+
+    # Save output surface
+    lib.io.write_curv(args.out, dist, vec=None, use_ascii=False)
+    lib.io.write_curv(args.out + '.dpv', dist, vec=vec, use_ascii=True)

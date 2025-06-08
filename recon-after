@@ -21,8 +21,9 @@ Options:
   
 --sdnew <subjects directory>
   Instead of overwriting the original data, store in a different
-  subjects directory. If this directory does not exist, an attempt will
-  be made to create it.
+  subjects directory. If the subject already exists in this directory,
+  the program will stop with an error to prevent overwriting. If this
+  directory does not exist, an attempt will be made to create it. 
 
 --all
   Do everything.
@@ -78,7 +79,6 @@ fi
 
 # Stop on crashes
 set -e # Stop immediately if an error happens
-set -u # Let's be sure all variables have been declared; crash otherwise
 
 # =====================================================================
 check_fs() {
@@ -108,8 +108,10 @@ check_fs() {
 
 # =====================================================================
 checkfiles() {
-   # Confirm that FS has run successfully up to the stage we need; if not, inform the user about the missing files
-   # Note we don't care here if recon-all.log shows last a failed run. As long as these files exist, we are ok to proceed.
+   # Confirm that FS has run successfully up to the stage we need;
+   # If not, inform the user about the missing files. Note we don't care
+   # here if recon-all.log shows last a failed run. As long as these
+   # files exist, we are ok to proceed.
    FILELIST=${1}
    MISSING=()
    for f in "${FILELIST[@]}" ; do
@@ -197,9 +199,12 @@ while [[ ${#} -gt 0 ]] ; do
    esac
 done
 
+# Directory of this script
+AFTERDIR=$(dirname "$(readlink -f "${0}")")
+
 # Confirm we have FreeSurfer available
 if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
-   echo "Error: FreeSurfer not correctly configured. Aborting."
+   echo "Error: FreeSurfer not correctly configured. Stopping."
    exit 1
 fi
 
@@ -210,10 +215,14 @@ fi
 
 # Make a copy into NEW_SUBJECTS_DIR and use it instead of the original SUBJECTS_DIR
 if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
-   NEW_SUBJECTS_DIR=$(readlink -f "${SUBJECTS_DIR}")
-   mkdir -p ${NEW_SUBJECTS_DIR}
-   cp -rp ${SUBJECTS_DIR}/${subj} ${NEW_SUBJECTS_DIR}/
-   export SUBJECTS_DIR=${NEW_SUBJECTS_DIR}
+   NEW_SUBJECTS_DIR=$(readlink -f "${NEW_SUBJECTS_DIR}")
+   if [[ -d "${NEW_SUBJECTS_DIR}/${subj}" ]] ; then
+      echo "Directory already exists: ${NEW_SUBJECTS_DIR}/${subj}. Stopping."
+   else
+      mkdir -p ${NEW_SUBJECTS_DIR}
+      cp -rp ${SUBJECTS_DIR}/${subj} ${NEW_SUBJECTS_DIR}/
+      export SUBJECTS_DIR=${NEW_SUBJECTS_DIR}
+   fi
 fi
 
 # =====================================================================
@@ -233,7 +242,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 
    # Do the retessellation proper
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
-   $(dirname "$(readlink -f "${0}")")/retessellate.py --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+   ${AFTERDIR}/retessellate --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
    # Replace the existing ?h.orig for the retessellated
    if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
@@ -309,8 +318,12 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       fi
    done
    
-   # Compute distances and vectors indicating the repositioning done by FreeSurfer
-   # ...
+   # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
+   for h in lh rh ; do
+      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
+                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
+                           --out ${SUBJECTS_DIR}/${subj}/after/${h}.dist
+   done
 fi
 
 # =====================================================================
@@ -326,7 +339,7 @@ if ${DOCURVATURES} || ${DOALL} ; then
    checkfiles ${FILELIST} "computation of curvatures"
    
    # Compute the curvatures
-   $(dirname "$(readlink -f "${0}")")/curvatures.py --subj ${subj} --srf white,pial --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+   ${AFTERDIR}/curvatures --subj ${subj} --surf white,pial --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 fi
 
 # =====================================================================
@@ -339,19 +352,12 @@ if ${DOLGI} || ${DOALL} ; then
       ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
    checkfiles ${FILELIST} "computation of the LGI"
 
-   # Lets use our customized "getmatlab" which will point to Octave
-   export PATH=$(dirname "$(readlink -f "${0}")"):${PATH}
-
    # Compute the LGI proper
+   PATH=${AFTERDIR}:${PATH} \
    ${FREESURFER_HOME}/bin/recon-all \
      -s "${subj}" \
      -sd "${SUBJECTS_DIR}" \
      -localGI
-     
-   # Let's symlink into the curvs directory as it's a good place to keep it
-   for h in lh rh ; do 
-      ln -s ../../surf/${h}.pial_lgi ${SUBJECTS_DIR}/${subj}/after/curvs/
-   done
 fi
 
 # =====================================================================
@@ -362,6 +368,6 @@ if ${DOVIEWS} || ${DOALL} ; then
    (${DOLGI}        || ${DOALL}) && OPTS="${OPTS} --lgi"
    (${DOFRACTAL}    || ${DOALL}) && OPTS="${OPTS} --fd"
    (${DOMYELIN}     || ${DOALL}) && OPTS="${OPTS} --myelin"
-   $(dirname "$(readlink -f "${0}")")/views.py --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
+   ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi
 

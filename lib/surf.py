@@ -7,7 +7,11 @@ Created on Sat Jun  7 18:23:07 2025
 """
 
 import numpy as np
-from . utils import progress_bar
+import time
+
+#from . utils import progress_bar
+from . import utils
+from . import geom
 
 # =============================================================================
 def calc_normals(vtx, fac):
@@ -186,24 +190,24 @@ def calc_voronoi_areas(vtx, fac):
     # If the circumcenter P is outside edge c (segment AB)
     idx = area['ABP'] < 0
     if idx.any():
-        m[idx,:,:] = line_intersection(triABC[idx,0,:], triABC[idx,1,:], triabc[idx,1,:], P[idx,0,:])[0][:,None,:] # intersection AB x bP
-        n[idx,:,:] = line_intersection(triABC[idx,0,:], triABC[idx,1,:], triabc[idx,0,:], P[idx,0,:])[0][:,None,:] # intersection AB x aP
+        m[idx,:,:] = geom.line_intersection(triABC[idx,0,:], triABC[idx,1,:], triabc[idx,1,:], P[idx,0,:])[0][:,None,:] # intersection AB x bP
+        n[idx,:,:] = geom.line_intersection(triABC[idx,0,:], triABC[idx,1,:], triabc[idx,0,:], P[idx,0,:])[0][:,None,:] # intersection AB x aP
         tri['AmP'][idx,:,:] = np.concatenate((triABC[idx,0,None,:], m[idx,:,:], P[idx,:,:]), axis=1)
         tri['BPn'][idx,:,:] = np.concatenate((triABC[idx,1,None,:], P[idx,:,:], n[idx,:,:]), axis=1)
     
     # If the circumcenter P is outside edge b (segment CA)
     idx = area['APC'] < 0
     if idx.any():
-        m[idx,:,:] = line_intersection(triABC[idx,2,:], triABC[idx,0,:], triabc[idx,0,:], P[idx,0,:])[0][:,None,:] # intersection CA x aP
-        n[idx,:,:] = line_intersection(triABC[idx,2,:], triABC[idx,0,:], triabc[idx,2,:], P[idx,0,:])[0][:,None,:] # intersection CA x cP
+        m[idx,:,:] = geom.line_intersection(triABC[idx,2,:], triABC[idx,0,:], triabc[idx,0,:], P[idx,0,:])[0][:,None,:] # intersection CA x aP
+        n[idx,:,:] = geom.line_intersection(triABC[idx,2,:], triABC[idx,0,:], triabc[idx,2,:], P[idx,0,:])[0][:,None,:] # intersection CA x cP
         tri['CmP'][idx,:,:] = np.concatenate((triABC[idx,2,None,:], m[idx,:,:], P[idx,:,:]), axis=1)
         tri['APn'][idx,:,:] = np.concatenate((triABC[idx,0,None,:], P[idx,:,:], n[idx,:,:]), axis=1)
     
     # If the circumcenter P is outside edge a (segment BC)
     idx = area['PBC'] < 0
     if idx.any():
-        m[idx,:,:] = line_intersection(triABC[idx,1,:], triABC[idx,2,:], triabc[idx,2,:], P[idx,0,:])[0][:,None,:] # intersection BC x cP
-        n[idx,:,:] = line_intersection(triABC[idx,1,:], triABC[idx,2,:], triabc[idx,1,:], P[idx,0,:])[0][:,None,:] # intersection BC x bP
+        m[idx,:,:] = geom.line_intersection(triABC[idx,1,:], triABC[idx,2,:], triabc[idx,2,:], P[idx,0,:])[0][:,None,:] # intersection BC x cP
+        n[idx,:,:] = geom.line_intersection(triABC[idx,1,:], triABC[idx,2,:], triabc[idx,1,:], P[idx,0,:])[0][:,None,:] # intersection BC x bP
         tri['BmP'][idx,:,:] = np.concatenate((triABC[idx,1,None,:], m[idx,:,:], P[idx,:,:]), axis=1)
         tri['CPn'][idx,:,:] = np.concatenate((triABC[idx,2,None,:], P[idx,:,:], n[idx,:,:]), axis=1)
     
@@ -299,7 +303,7 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     # Precompute transforms from the global to local coordinate system of each vertex
     rotv = np.zeros((3,3,nvtx))
     for v in range(nvtx):
-       rotv[:,:,v] = normal2zaxis(vtxn[v])
+       rotv[:,:,v] = geom.normal2zaxis(vtxn[v])
     
     # Allocate space to store the Weingarten matrix for each vertex
     IIv = np.zeros((2,2,nvtx))
@@ -313,10 +317,10 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     start_time = time.time()
     for f in range(nfac):
         if progress:
-            progress_bar(f, nfac, start_time, prefix='Processing faces:', min_update_interval=1)
+            utils.progress_bar(f, nfac, start_time, prefix='Processing faces:', min_update_interval=1)
             
         # Transformation from the global the local coordinate system of this face
-        rotf = normal2zaxis(facn[f])
+        rotf = geom.normal2zaxis(facn[f])
 
         # Axes (uf,vf,wf) of the local face coordinate system
         uf = np.array([1,0,0])
@@ -525,7 +529,6 @@ def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
     xbary = np.mean(facvtx1[:, [0, 3, 6], None], axis=1)    # x-coordinate
     ybary = np.mean(facvtx1[:, [1, 4, 7], None], axis=1)    # y-coordinate
     zbary = np.mean(facvtx1[:, [2, 5, 8], None], axis=1)    # z-coordinate
-    cbary = np.hstack((xbary, ybary, zbary))                # Cartesian coordinates of the barycenters
     r     = np.sqrt(xbary**2 + ybary**2 + zbary**2)         # radius
     theta = np.arctan2(ybary, xbary)                        # azimuth (angle in x-y plane)
     phi   = np.arctan2(zbary, np.sqrt(xbary**2 + ybary**2)) # elevation (angle from z-axis)
@@ -566,7 +569,7 @@ def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
     start_time = time.time()
     for f in range(nF1):
         if progress:
-            progress_bar(f, nF1, start_time, prefix='Processing faces:', min_update_interval=1)
+            utils.progress_bar(f, nF1, start_time, prefix='Processing faces:', min_update_interval=1)
         
         vidx = fac1[f, :]         # Indices of the vertices for face f
         Fvtx = vtx1[vidx, :]      # Corresponding vertex coordinates from vtx1

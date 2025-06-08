@@ -118,7 +118,7 @@ if __name__ == "__main__":
             
                 # Compute principal curvatures
                 print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')
-                curvs = lib.surf.calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf)
+                curvs = lib.surf.calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
                 
                 # Compute composite measures based on k1 and k2
                 print('Computing composite curvatures from the principal curvatures')

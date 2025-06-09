@@ -613,5 +613,63 @@ def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
             
                 # Weight by the areas and interpolate the value between the 3 vertices
                 vtx4[Cidxi[v], :] = np.dot([aA, aB, aC], vtx3[vidx, :]) / aT
-        
     return vtx4
+
+# =============================================================================
+def icodown(vtx, fac, ntarget):
+    '''
+    Downsample a surface from from a higher-order tessellated icosahedron to
+    a lower order one.
+
+    Parameters
+    ----------
+    vtx : NumPy array (num vertices by 3)
+        Vertex coordinates (x,y,z).
+    fac : NumPy array (num faces by 3)
+        Face indices (all faces are triangular).
+    ntarget : int
+        Icosahedron order of the downsampled surface.
+
+    Returns
+    -------
+    vtxnew : NumPy array (num vertices by 3)
+        Vertex coordinates (x,y,z) of the downsampled surface.
+    facnew : NumPy array (num faces by 3)
+        Face indices of the downsampled surface.
+    '''
+    
+    # Constants for the icosahedron
+    V0 = 12
+    F0 = 20
+    
+    # Current icosahedron order
+    nV = vtx.shape[0]
+    n  = round(np.log((nV-2)/(V0-2))/np.log(4))
+    
+    # Sanity check
+    if nV != 4**n*(V0-2)+2:
+        raise ValueError('Data not from icosahedron.')
+    elif ntarget >= n:
+        raise ValueError(f'This script only downsamples data (target order: {ntarget} / input order: {n}).')
+    
+    # Remove vertices (keep only those needed for target order)
+    nVnew = 4**ntarget * (V0 - 2) + 2
+    vtx = vtx[:nVnew,:]
+    
+    # Remove face indices by iteratively downsampling
+    for j in range(n-1, ntarget-1, -1):
+        nFj     = 4**j * F0
+        nVjprev = 4**(j+1) * (V0 - 2) + 2
+        nFjprev = 4**(j+1) * F0
+        remap = np.arange(nVjprev)
+        for f in range(nFjprev):
+            v1 = fac[f,0]
+            v2 = fac[f,1] 
+            v3 = fac[f,2]
+            remap[v1] = min(remap[v1],v2,v3)
+        facnew = np.zeros((nFj,3), dtype=int)
+        for f in range(nFj):
+            for v in range(3):
+                facnew[f,v] = remap[fac[f,v]]
+        fac = facnew
+    return vtx, fac

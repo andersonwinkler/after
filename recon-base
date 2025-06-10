@@ -1,0 +1,157 @@
+#!/bin/bash
+
+if [ -z "$1" ]; then
+cat <<EOU
+Runs various additional surface processing steps after FreeSurfer's recon-all.
+
+Usage:
+
+${0##*/} --subj <subject ID> [options]
+
+Options:
+
+--subj <subject ID>
+  Specify the subject ID. Must exist in the subjects directory.
+
+--indir <input directory>
+  Specify the input directory that contains the raw data. It could be a BIDS
+  directory or any directory that contains a subdirectory named as the subject ID,
+  and contains files named *_T1w.nii.gz, *_T2w.nii.gz and *_FLAIR.nii.gz
+  (even if within subdirectories). All these files will be imported.
+
+--sd <subjects directory>
+  Specify the subjects directory if not the one defined by the environmental
+  variable SUBJECTS_DIR.
+  Note that either SUBJECTS_DIR must have been correctly set, --sd must be
+  provided with the path to the directory that contains all subjects.
+
+Requirements:
+* FreeSurfer must be installed and configured properly.
+
+_____________________________________
+Anderson M. Winkler
+University of Texas Rio Grande Valley
+Jun/2025
+https://brainder.org
+EOU
+exit 1
+fi
+
+# Stop on crashes
+set -e # Stop immediately if an error happens
+
+# Parse arguments
+while [[ ${#} -gt 0 ]] ; do
+   key="${1}"
+   case ${key} in
+      -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
+      subj="${2}"
+      shift 2
+      ;;
+   -id|-indir|--id|--indir)
+      INPUT_DIR="${2}"
+      shift 2
+      ;;
+   -sd|--sd)
+      SUBJECTS_DIR="${2}"
+      shift 2
+      ;;
+   *)
+      echo "Error: Unknown option: ${key}"
+      exit 1
+      ;;
+   esac
+done
+
+# Confirm we have FreeSurfer available
+if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
+   echo "Error: FreeSurfer not correctly configured. Stopping."
+   exit 1
+fi
+
+# Make sure we have a valid SUBJECTS_DIR
+if [[ -z "${SUBJECTS_DIR}" ]] || [[ ! -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
+   echo "Error: SUBJECTS_DIR variable not set or path provided with --sd is invalid."
+fi
+
+# We don't want to overwrite
+if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+   echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
+fi
+
+# =====================================================================
+# Find the relevant files
+T1W_LIST=$(find ${INPUT_DIR} -name *_T1w.nii.gz  |sort)
+T2W_LIST=$(find ${INPUT_DIR} -name *_T2w.nii.gz  |sort)
+FLA_LIST=$(find ${INPUT_DIR} -name *_FLAIR.nii.gz|sort)
+IN_T1W=""
+for f in ${T1W_LIST} ; do
+   IN_T1W="${IN_T1W} -i ${f}"
+done
+IN_T2W=""
+for f in ${T2W_LIST} ; do
+   IN_T2W="${IN_T2W} -T2 ${f}"
+done
+IN_FLA=""
+for f in ${FLA_LIST} ; do
+   IN_FLA="${IN_FLA} -FLAIR ${f}"
+done
+   
+# =====================================================================
+# Import into FreeSurfer
+${FREESURFER_HOME}/bin/recon-all \
+   -s "${subj}" \
+   -sd "${SUBJECTS_DIR}" \
+   ${IN_T1W} ${IN_T2W} ${IN_FLA}
+
+# Check if recon-all finished without error and make sure that that termination was just now
+result=($(check_fs))
+if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+   echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
+   echo "       Cannot confirm import was successful."
+   exit 1
+fi
+
+# =====================================================================
+# Run a basic FreeSurfer call
+${FREESURFER_HOME}/bin/recon-all \
+   -s "${subj}" \
+   -sd "${SUBJECTS_DIR}" \
+   -base-init \
+   -motioncor \
+   -talairach \
+   -talcheck \
+   -nuintensitycor \
+   -normalization \
+   -skullstrip \
+   -gcareg \
+   -canorm \
+   -careg \
+   -calabel \
+   -normalization2 \
+   -maskbfs \
+   -segmentation \
+   -fill \
+   -tessellate \
+   -smooth1 \
+   -inflate1 \
+   -qsphere \
+   -fix \
+   -autodetgwstats \
+   -white-preaparc \
+   -cortex-label \
+   -smooth2 \
+   -inflate2 \
+   -curvHK \
+   -sphere \
+   -surfreg \
+   -norandomness
+
+# Check if recon-all finished without error and make sure that that termination was just now
+result=($(check_fs))
+if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+   echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
+   echo "       Cannot confirm surface reconstruction was successful. Check the log files."
+   exit 1
+fi
+

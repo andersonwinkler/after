@@ -13,6 +13,13 @@ Options:
 --subj <subject ID>
   Specify the subject ID. Must exist in the subjects directory.
 
+--indir <input directory>
+  Specify the input directory that contains the raw data. It could be
+  a BIDS directory or any directory that contains a subdirectory named as
+  the subject ID, and contains files named *_T1w.nii.gz, *_T2w.nii.gz and
+  *_FLAIR.nii.gz (even if within subdirectories).
+  All these files will be imported.
+
 --sd <subjects directory>
   Specify the subjects directory if not the one defined by the environmental
   variable SUBJECTS_DIR.
@@ -131,7 +138,9 @@ checkfiles() {
 }
 
 # =====================================================================
-# Some default variables, will be modified later
+# Some default variables, most will be modified later
+AFTERDIR=$(dirname "$(readlink -f "${0}")") # Directory of this script
+IN_DIR=""               # Input directory containing a ${subj} subdirectory, for importing
 NEW_SUBJECTS_DIR=""     # New subjects dir to store outputs. Will be replaced below.
 DOALL=false             # Do everything
 DORETESSELLATE=false    # Do the retessellation
@@ -150,6 +159,10 @@ while [[ ${#} -gt 0 ]] ; do
    case ${key} in
       -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
       subj="${2}"
+      shift 2
+      ;;
+   -id|-indir|--id|--indir)
+      INPUT_DIR="${2}"
       shift 2
       ;;
    -sd|--sd)
@@ -199,9 +212,7 @@ while [[ ${#} -gt 0 ]] ; do
    esac
 done
 
-# Directory of this script
-AFTERDIR=$(dirname "$(readlink -f "${0}")")
-
+# =====================================================================
 # Confirm we have FreeSurfer available
 if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
    echo "Error: FreeSurfer not correctly configured. Stopping."
@@ -211,9 +222,25 @@ fi
 # Make sure we have a valid SUBJECTS_DIR
 if [[ -z "${SUBJECTS_DIR}" ]] || [[ ! -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
    echo "Error: SUBJECTS_DIR variable not set or path provided with --sd is invalid."
+   exit 1
 fi
 
-# Make a copy into NEW_SUBJECTS_DIR and use it instead of the original SUBJECTS_DIR
+# We don't want to overwrite
+if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+   echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
+   exit 1
+fi
+
+# The logic of starting a new subject from scratch (--indir) isn't compatible
+# with copying from an existing to a new subjects dir (--sdnew)
+if [[ -z "${NEW_SUBJECTS_DIR}" ]] || [[ ! -z "${IN_DIR}" ]] ; then
+   echo "Error: Cannot use --indir together with --sdnew."
+   exit 1
+fi
+
+# =====================================================================
+# Make a copy from SUBJECTS_DIR into NEW_SUBJECTS_DIR and use it
+# instead of the original SUBJECTS_DIR
 if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
    NEW_SUBJECTS_DIR=$(readlink -f "${NEW_SUBJECTS_DIR}")
    if [[ -d "${NEW_SUBJECTS_DIR}/${subj}" ]] ; then
@@ -223,6 +250,86 @@ if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ -d "$(readlink -f "${SUBJECTS_DIR}")" 
       cp -rp ${SUBJECTS_DIR}/${subj} ${NEW_SUBJECTS_DIR}/
       export SUBJECTS_DIR=${NEW_SUBJECTS_DIR}
    fi
+fi
+
+# =====================================================================
+# Create a new subject by importing new imaging data
+if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] ; then
+   if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+      echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
+   fi
+   T1W_LIST=$(find ${INPUT_DIR} -name *_T1w.nii.gz  |sort)
+   T2W_LIST=$(find ${INPUT_DIR} -name *_T2w.nii.gz  |sort)
+   FLA_LIST=$(find ${INPUT_DIR} -name *_FLAIR.nii.gz|sort)
+   IN_T1W=""
+   for f in ${T1W_LIST} ; do
+      IN_T1W="${IN_T1W} -i ${f}"
+   done
+   IN_T2W=""
+   for f in ${T2W_LIST} ; do
+      IN_T2W="${IN_T2W} -T2 ${f}"
+   done
+   IN_FLA=""
+   for f in ${FLA_LIST} ; do
+      IN_FLA="${IN_FLA} -FLAIR ${f}"
+   done
+   
+   # Import into FreeSurfer
+   ${FREESURFER_HOME}/bin/recon-all \
+      -s "${subj}" \
+      -sd "${SUBJECTS_DIR}" \
+      ${IN_T1W} ${IN_T2W} ${IN_FLA}
+
+   # Check if recon-all finished without error and make sure that that termination was just now
+   result=($(check_fs))
+   if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+      echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
+      echo "       Cannot confirm import was successful."
+      exit 1
+   fi
+fi
+
+# =====================================================================
+# Run a basic FreeSurfer call
+${FREESURFER_HOME}/bin/recon-all \
+   -s "${subj}" \
+   -sd "${SUBJECTS_DIR}" \
+   -base-init \
+   -motioncor \
+   -talairach \
+   -talcheck \
+   -nuintensitycor \
+   -normalization \
+   -skullstrip \
+   -gcareg \
+   -canorm \
+   -careg \
+   -calabel \
+   -normalization2 \
+   -maskbfs \
+   -segmentation \
+   -fill \
+   -tessellate \
+   -smooth1 \
+   -inflate1 \
+   -qsphere \
+   -fix \
+   -autodetgwstats \
+   -white-preaparc \
+   -cortex-label \
+   -smooth2 \
+   -inflate2 \
+   -curvHK \
+   -sphere \
+   -surfreg \
+   -norandomness
+
+# Check if recon-all finished without error and make sure that that termination was just now
+result=($(check_fs))
+if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+   echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
+   echo "       Cannot confirm surface reconstruction was successful. Check the log files."
+   exit 1
 fi
 
 # =====================================================================

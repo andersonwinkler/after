@@ -35,6 +35,10 @@ Options:
 --all
   Do everything.
 
+--base
+  Call recon-all up to surface registration (minimum needed to retessellate
+  if FreeSurfer has not already been run).
+
 --retessellate
   Do the retessellation to fsaverage. Data must have been processed with
   recon-all up to the point where the surface registration is performed
@@ -143,6 +147,7 @@ AFTERDIR=$(dirname "$(readlink -f "${0}")") # Directory of this script
 IN_DIR=""               # Input directory containing a ${subj} subdirectory, for importing
 NEW_SUBJECTS_DIR=""     # New subjects dir to store outputs. Will be replaced below.
 DOALL=false             # Do everything
+DOBASE=false            # Do a basic reconstruction up to surface registration
 DORETESSELLATE=false    # Do the retessellation
 DOCURVATURES=false      # Compute the better curvatures and their composites
 DOLGI=false             # Compute the LGI
@@ -162,7 +167,7 @@ while [[ ${#} -gt 0 ]] ; do
       shift 2
       ;;
    -id|-indir|--id|--indir)
-      INPUT_DIR="${2}"
+      IN_DIR="${2}"
       shift 2
       ;;
    -sd|--sd)
@@ -175,6 +180,10 @@ while [[ ${#} -gt 0 ]] ; do
       ;;
    -all|--all)
       DOALL=true
+      shift
+      ;;
+   -base|--base)
+      DOBASE=true
       shift
       ;;
    -retessellate|--retessellate)
@@ -233,7 +242,7 @@ fi
 
 # The logic of starting a new subject from scratch (--indir) isn't compatible
 # with copying from an existing to a new subjects dir (--sdnew)
-if [[ -z "${NEW_SUBJECTS_DIR}" ]] || [[ ! -z "${IN_DIR}" ]] ; then
+if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ ! -z "${IN_DIR}" ]] ; then
    echo "Error: Cannot use --indir together with --sdnew."
    exit 1
 fi
@@ -253,83 +262,73 @@ if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ -d "$(readlink -f "${SUBJECTS_DIR}")" 
 fi
 
 # =====================================================================
-# Create a new subject by importing new imaging data
-if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] ; then
-   if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
-      echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
+# Run an initial FreeSurfer call
+if ${DOBASE} || ${DOALL} || [[ ! -z "${IN_DIR}" ]] ; then
+
+   # Create a new subject by importing new imaging data
+   if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] ; then
+      if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+         echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
+      fi
+      T1W_LIST=$(find ${IN_DIR}/${subj} -name *_T1w.nii.gz  |sort)
+      T2W_LIST=$(find ${IN_DIR}/${subj} -name *_T2w.nii.gz  |sort)
+      FLA_LIST=$(find ${IN_DIR}/${subj} -name *_FLAIR.nii.gz|sort)
+      IN_T1W=""
+      for f in ${T1W_LIST} ; do
+         IN_T1W="${IN_T1W} -i ${f}"
+      done
+      IN_T2W=""
+      for f in ${T2W_LIST} ; do
+         IN_T2W="${IN_T2W} -T2 ${f}"
+      done
+      IN_FLA=""
+      for f in ${FLA_LIST} ; do
+         IN_FLA="${IN_FLA} -FLAIR ${f}"
+      done
    fi
-   T1W_LIST=$(find ${INPUT_DIR} -name *_T1w.nii.gz  |sort)
-   T2W_LIST=$(find ${INPUT_DIR} -name *_T2w.nii.gz  |sort)
-   FLA_LIST=$(find ${INPUT_DIR} -name *_FLAIR.nii.gz|sort)
-   IN_T1W=""
-   for f in ${T1W_LIST} ; do
-      IN_T1W="${IN_T1W} -i ${f}"
-   done
-   IN_T2W=""
-   for f in ${T2W_LIST} ; do
-      IN_T2W="${IN_T2W} -T2 ${f}"
-   done
-   IN_FLA=""
-   for f in ${FLA_LIST} ; do
-      IN_FLA="${IN_FLA} -FLAIR ${f}"
-   done
-   
-   # Import into FreeSurfer
+
+   # Run recon-all up to the surface registration. Import files as needed.
    ${FREESURFER_HOME}/bin/recon-all \
       -s "${subj}" \
       -sd "${SUBJECTS_DIR}" \
+      -base-init \
+      -motioncor \
+      -talairach \
+      -talcheck \
+      -nuintensitycor \
+      -normalization \
+      -skullstrip \
+      -gcareg \
+      -canorm \
+      -careg \
+      -calabel \
+      -normalization2 \
+      -maskbfs \
+      -segmentation \
+      -fill \
+      -tessellate \
+      -smooth1 \
+      -inflate1 \
+      -qsphere \
+      -fix \
+      -autodetgwstats \
+      -white-preaparc \
+      -cortex-label \
+      -smooth2 \
+      -inflate2 \
+      -curvHK \
+      -sphere \
+      -surfreg \
+      -norandomness \
       ${IN_T1W} ${IN_T2W} ${IN_FLA}
 
    # Check if recon-all finished without error and make sure that that termination was just now
    result=($(check_fs))
    if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
       echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
-      echo "       Cannot confirm import was successful."
+      echo "       Cannot confirm surface reconstruction was successful. Check the log files."
       exit 1
    fi
-fi
-
-# =====================================================================
-# Run a basic FreeSurfer call
-${FREESURFER_HOME}/bin/recon-all \
-   -s "${subj}" \
-   -sd "${SUBJECTS_DIR}" \
-   -base-init \
-   -motioncor \
-   -talairach \
-   -talcheck \
-   -nuintensitycor \
-   -normalization \
-   -skullstrip \
-   -gcareg \
-   -canorm \
-   -careg \
-   -calabel \
-   -normalization2 \
-   -maskbfs \
-   -segmentation \
-   -fill \
-   -tessellate \
-   -smooth1 \
-   -inflate1 \
-   -qsphere \
-   -fix \
-   -autodetgwstats \
-   -white-preaparc \
-   -cortex-label \
-   -smooth2 \
-   -inflate2 \
-   -curvHK \
-   -sphere \
-   -surfreg \
-   -norandomness
-
-# Check if recon-all finished without error and make sure that that termination was just now
-result=($(check_fs))
-if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
-   echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
-   echo "       Cannot confirm surface reconstruction was successful. Check the log files."
-   exit 1
 fi
 
 # =====================================================================
@@ -352,10 +351,10 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    ${AFTERDIR}/retessellate --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
    # Replace the existing ?h.orig for the retessellated
-   if [[ -f ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
-      [[ -f ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
-      cp -rpv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-      cp -rpv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+   if [[ -f   ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
+      [[ -f   ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
+      mv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      mv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
    else
       echo "Retessellation failed. The expected output files were not both produced:"
       echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
@@ -429,7 +428,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    for h in lh rh ; do
       ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
                            --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
-                           --out ${SUBJECTS_DIR}/${subj}/after/${h}.dist
+                           --out ${SUBJECTS_DIR}/${subj}/after/${h}.reposition_displacement
    done
 fi
 
@@ -468,13 +467,42 @@ if ${DOLGI} || ${DOALL} ; then
 fi
 
 # =====================================================================
-# Make nice figures and histograms for inspection
+# Compute the fractal dimension
+if ${DOFRACTAL} || ${DOALL} ; then
+
+   # Check we have all files needed for this step
+   FILELIST=(
+      ${SUBJECTS_DIR}/${subj}/surf/lh.pial
+      ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
+   checkfiles ${FILELIST} "computation of the FD"
+
+   # Compute the FD proper
+   echo "Ongoing work -- fdic"
+fi
+
+# =====================================================================
+# Compute the myelin proxy
+if ${DOMYELIN} || ${DOALL} ; then
+
+   # Check we have all files needed for this step
+   FILELIST=(
+      ${SUBJECTS_DIR}/${subj}/mri/XXX
+      ${SUBJECTS_DIR}/${subj}/mri/YYY )
+   checkfiles ${FILELIST} "computation of myelin proxy"
+
+   # Compute the FD proper
+   echo "Ongoing work -- melina"
+fi
+
+# =====================================================================
+# Make nice figures and histograms for visual inspection
 if ${DOVIEWS} || ${DOALL} ; then
    OPTS=""
-   (${DOCURVATURES} || ${DOALL}) && OPTS="${OPTS} --curvatures"
-   (${DOLGI}        || ${DOALL}) && OPTS="${OPTS} --lgi"
-   (${DOFRACTAL}    || ${DOALL}) && OPTS="${OPTS} --fd"
-   (${DOMYELIN}     || ${DOALL}) && OPTS="${OPTS} --myelin"
+   (${DORETESSELLATE} || ${DOALL}) && OPTS="${OPTS} --retessellation"
+   (${DOCURVATURES}   || ${DOALL}) && OPTS="${OPTS} --curvatures"
+   (${DOLGI}          || ${DOALL}) && OPTS="${OPTS} --lgi"
+   (${DOFRACTAL}      || ${DOALL}) && OPTS="${OPTS} --fd"
+   (${DOMYELIN}       || ${DOALL}) && OPTS="${OPTS} --myelin"
    ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi
 

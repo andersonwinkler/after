@@ -235,8 +235,8 @@ if [[ -z "${SUBJECTS_DIR}" ]] || [[ ! -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ;
 fi
 
 # We don't want to overwrite
-if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
-   echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
+if [[ ! -z "${IN_DIR}" ]] && [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+   echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Will not import new data with --indir. Delete it manually first. Stopping."
    exit 1
 fi
 
@@ -253,7 +253,7 @@ fi
 if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ -d "$(readlink -f "${SUBJECTS_DIR}")" ]] ; then
    NEW_SUBJECTS_DIR=$(readlink -f "${NEW_SUBJECTS_DIR}")
    if [[ -d "${NEW_SUBJECTS_DIR}/${subj}" ]] ; then
-      echo "Directory already exists: ${NEW_SUBJECTS_DIR}/${subj}. Stopping."
+      echo "Directory already exists: ${NEW_SUBJECTS_DIR}/${subj}. Will not overwrite with --sdnew. Delete it manually first. Stopping."
    else
       mkdir -p ${NEW_SUBJECTS_DIR}
       cp -rp ${SUBJECTS_DIR}/${subj} ${NEW_SUBJECTS_DIR}/
@@ -277,50 +277,27 @@ if ${DOBASE} || ${DOALL} || [[ ! -z "${IN_DIR}" ]] ; then
       for f in ${T1W_LIST} ; do
          IN_T1W="${IN_T1W} -i ${f}"
       done
-      IN_T2W=""
+      IN_T2W="-noT2pial"
       for f in ${T2W_LIST} ; do
          IN_T2W="${IN_T2W} -T2 ${f}"
       done
-      IN_FLA=""
+      IN_FLA="-noFLAIRpial"
       for f in ${FLA_LIST} ; do
          IN_FLA="${IN_FLA} -FLAIR ${f}"
       done
    fi
 
-   # Run recon-all up to the surface registration. Import files as needed.
+   # Run recon-all up to white an pial. Import files as needed.
    ${FREESURFER_HOME}/bin/recon-all \
       -s "${subj}" \
       -sd "${SUBJECTS_DIR}" \
-      -base-init \
-      -motioncor \
-      -talairach \
-      -talcheck \
-      -nuintensitycor \
-      -normalization \
-      -skullstrip \
-      -gcareg \
-      -canorm \
-      -careg \
-      -calabel \
-      -normalization2 \
-      -maskbfs \
-      -segmentation \
-      -fill \
-      -tessellate \
-      -smooth1 \
-      -inflate1 \
-      -qsphere \
-      -fix \
-      -autodetgwstats \
-      -white-preaparc \
-      -cortex-label \
-      -smooth2 \
-      -inflate2 \
-      -curvHK \
+      ${IN_T1W} \
+      -autorecon1 \
+      -autorecon2 \
       -sphere \
       -surfreg \
-      -norandomness \
-      ${IN_T1W} ${IN_T2W} ${IN_FLA}
+      -norandomness
+      # ${IN_T2W} ${IN_FLA}
 
    # Check if recon-all finished without error and make sure that that termination was just now
    result=($(check_fs))
@@ -367,46 +344,48 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    T2pial=false
    FLAIRpial=false
    [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz         ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2    ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2    ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
    [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz      ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
+   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true
    ${T2pial}    && OPTS="${OPTS} -T2pial"
    ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
 
    # Redo recon-all, from the point in which ?h.orig is used
    ${FREESURFER_HOME}/bin/recon-all \
-     -s "${subj}" \
-     -sd "${SUBJECTS_DIR}" \
-     -white-preaparc \
-     -cortex-label \
-     -smooth2 \
-     -inflate2 \
-     -curvHK \
-     -sphere \
-     -surfreg \
-     -jacobian_white \
-     -avgcurv \
-     -cortparc \
-     -white \
-     -pial \
-     -curvstats \
-     -cortribbon \
-     -cortparc2 \
-     -cortparc3 \
-     -pctsurfcon \
-     -hyporelabel \
-     -aparc2aseg \
-     -apas2aseg \
-     -wmparc \
-     -parcstats \
-     -parcstats2 \
-     -parcstats3 \
-     -segstats \
-     -balabels ${OPTS}
+      -s "${subj}" \
+      -sd "${SUBJECTS_DIR}" \
+      -white-preaparc \
+      -cortex-label \
+      -smooth2 \
+      -inflate2 \
+      -curvHK \
+      -sphere \
+      -surfreg \
+      -jacobian_white \
+      -avgcurv \
+      -cortparc \
+      -white \
+      -pial \
+      -curvstats \
+      -cortribbon \
+      -cortparc2 \
+      -cortparc3 \
+      -pctsurfcon \
+      -hyporelabel \
+      -aparc2aseg \
+      -apas2aseg \
+      -wmparc \
+      -parcstats \
+      -parcstats2 \
+      -parcstats3 \
+      -segstats \
+      -balabels ${OPTS}
 
    # Check if recon-all finished without error and make sure that that termination was just now
    result=($(check_fs))

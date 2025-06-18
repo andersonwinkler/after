@@ -131,7 +131,6 @@ checkfiles() {
    done
    if [[ ! -z ${MISSING} ]] ; then
       echo "Error: Previous call to FreeSurfer did not run up to the stage needed to allow ${2}."
-      echo "Make sure all steps at least up to surface registration (up to -surfreg) have been executed successfully."
       echo "The missing files are:"
       for f in "${MISSING[@]}" ; do
          echo "- ${f}"
@@ -225,6 +224,14 @@ done
 if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
    echo "Error: FreeSurfer not correctly configured. Stopping."
    exit 1
+fi
+
+# Confirm we have FSL available
+if ${DOALL} || ${DOMYELIN} ; then
+   if [[ ! -e ${FSLDIR}/bin/fslmaths ]] ; then
+      echo "Error: FSL not correctly configured. Stopping."
+      exit 1
+   fi
 fi
 
 # Make sure we have a valid SUBJECTS_DIR
@@ -468,14 +475,8 @@ fi
 # Compute the myelin proxy
 if ${DOMYELIN} || ${DOALL} ; then
 
-   # Check we have all files needed for this step
-   FILELIST=(
-      ${SUBJECTS_DIR}/${subj}/mri/XXX
-      ${SUBJECTS_DIR}/${subj}/mri/YYY )
-   checkfiles ${FILELIST} "computation of myelin proxy"
-
-   # Compute the FD proper
-   echo "Ongoing work -- melina"
+   # Note there's no need to check if files exist as that will be done by melina.
+   ${AFTERDIR}/melina -s ${subj} -c
 fi
 
 # =====================================================================

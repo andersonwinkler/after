@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
+'''
 Created on Sat Jun  7 18:27:11 2025
 
 @author: winkler
-"""
+'''
 
 import numpy as np
 
@@ -84,3 +84,295 @@ def normal2zaxis(n):
         [-axis[1],  axis[0],       0]])
     rot    = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
     return rot
+
+# =============================================================================
+# Functions to create Platonic polihedra
+def tetrahedron(meas='e', value=1):
+    '''Generate tetrahedron vertices and faces.'''
+    vtx = np.array([
+        [1, 1, 1],
+        [-1, 1, -1],
+        [1, -1, -1],
+        [-1, -1, 1] ])
+    vtx = vtx / (2 * np.sqrt(2)) # make edge = 1
+    fac = np.array([
+        [0, 2, 1],
+        [1, 2, 3],
+        [0, 3, 2],
+        [0, 1, 3] ])
+    scaling = {
+            'e': value,
+            'af': np.sqrt(4 * value / np.sqrt(3)),
+            'at': np.sqrt(value / np.sqrt(3)),
+            'v': (12 * value / np.sqrt(2)) ** (1/3),
+            'cr': value * np.sqrt(8/3),
+            'ir': value * np.sqrt(24) }
+    vtx = vtx * scaling[meas]
+    return vtx, fac
+
+def hexahedron(meas='e', value=1):
+    '''Generate hexahedron (cube) vertices and faces.'''
+    vtx = np.array([
+        [1, 1, -1], [1, -1, -1], [-1, -1, -1], [-1, 1, -1],
+        [1, 1, 1], [1, -1, 1], [-1, -1, 1], [-1, 1, 1] ])
+    vtx = vtx / 2 # make edge = 1
+    fac = np.array([
+        [0, 1, 2, 3],
+        [4, 7, 6, 5],
+        [0, 4, 5, 1],
+        [1, 5, 6, 2],
+        [2, 6, 7, 3],
+        [4, 0, 3, 7] ])
+    scaling = {
+            'e': value,
+            'af': np.sqrt(value),
+            'at': np.sqrt(value / 6),
+            'v': value ** (1/3),
+            'cr': 2 * value / np.sqrt(3),
+            'ir': 2 * value }
+    vtx = vtx * scaling[meas]
+    return vtx, fac
+
+def octahedron(meas='e', value=1):
+    '''Generate octahedron vertices and faces.'''
+    vtx = np.array([
+        [1, 0, 0], [0, 1, 0], [0, 0, 1],
+        [-1, 0, 0], [0, -1, 0], [0, 0, -1] ])
+    vtx = vtx / np.sqrt(2) # make edge = 1
+    fac = np.array([
+        [0, 1, 2], [1, 3, 2], [3, 4, 2], [4, 0, 2],
+        [1, 0, 5], [3, 1, 5], [4, 3, 5], [0, 4, 5] ])
+    scaling = {
+            'e': value,
+            'af': np.sqrt(4 * value / np.sqrt(3)),
+            'at': np.sqrt(value / (2 * np.sqrt(3))),
+            'v': (3 * value / np.sqrt(2)) ** (1/3),
+            'cr': 2 * value / np.sqrt(2),
+            'ir': 6 * value / np.sqrt(6) }
+    vtx = vtx * scaling[meas]
+    return vtx, fac
+
+def dodecahedron(meas='e', value=1):
+    '''Generate dodecahedron vertices and faces.'''
+    g = (1 + np.sqrt(5)) / 2  # Golden ratio
+    vtx = np.array([
+        [1/g, 0, g], [-1/g, 0, g], [1/g, 0, -g], [-1/g, 0, -g],
+        [0, g, -1/g], [0, g, 1/g], [0, -g, -1/g], [0, -g, 1/g],
+        [g, 1/g, 0], [g, -1/g, 0], [-g, 1/g, 0], [-g, -1/g, 0],
+        [1, 1, 1], [-1, 1, 1], [1, -1, 1], [1, 1, -1],
+        [1, -1, -1], [-1, 1, -1], [-1, -1, 1], [-1, -1, -1] ])
+    vtx = vtx * g / 2 # make edge = 1
+    fac = np.array([
+        [12, 5, 13, 1, 0], [18, 7, 14, 0, 1], [16, 6, 19, 3, 2],
+        [17, 4, 15, 2, 3], [4, 5, 12, 8, 15], [5, 4, 17, 10, 13],
+        [6, 7, 18, 11, 19], [7, 6, 16, 9, 14], [12, 0, 14, 9, 8],
+        [16, 2, 15, 8, 9], [17, 3, 19, 11, 10], [18, 1, 13, 10, 11] ])
+    scaling = {
+            'e': value,
+            'af': np.sqrt(4 * value / np.sqrt(25 + 10 * np.sqrt(5))),
+            'at': np.sqrt(value / (3 * np.sqrt(25 + 10 * np.sqrt(5)))),
+            'v': (4 * value / (15 + 7 * np.sqrt(5))) ** (1/3),
+            'cr': 4 * value / (np.sqrt(15) + np.sqrt(3)),
+            'ir': 20 * value / np.sqrt(250 + 110 * np.sqrt(5)) }
+    vtx = vtx * scaling[meas]
+    return vtx, fac
+
+def icosahedron(meas='e', value=1, fsmode=True):
+    '''
+    Generate icosahedron vertices and faces.
+    If fsmode=True, will generate the coordinates as used in fsaverage,
+    albeit with higher precision.
+    '''
+    if fsmode:
+        sqrt5 = np.sqrt(5)
+        vtx = np.array([
+            [0, 0, 1],
+            [ +(5-sqrt5)/10, -np.sqrt((5+sqrt5)/10), +1/sqrt5 ],
+            [ 2/sqrt5, 0, 1/sqrt5 ],
+            [ +(5-sqrt5)/10, +np.sqrt((5+sqrt5)/10), +1/sqrt5 ],
+            [ -(5+sqrt5)/10, +np.sqrt((5-sqrt5)/10), +1/sqrt5 ],
+            [ -(5+sqrt5)/10, -np.sqrt((5-sqrt5)/10), +1/sqrt5 ],
+            [ -(5-sqrt5)/10, -np.sqrt((5+sqrt5)/10), -1/sqrt5 ],
+            [ +(5+sqrt5)/10, -np.sqrt((5-sqrt5)/10), -1/sqrt5 ],
+            [ +(5+sqrt5)/10, +np.sqrt((5-sqrt5)/10), -1/sqrt5 ],
+            [ -(5-sqrt5)/10, +np.sqrt((5+sqrt5)/10), -1/sqrt5 ],
+            [ -2/sqrt5, 0, -1/sqrt5 ],
+            [0, 0, -1] ])
+        vtx = vtx * np.sqrt(10+2*sqrt5)/4; # make edge = 1
+        fac = np.array([
+            [0, 3, 4], [ 0, 4, 5], [ 0, 5, 1], [ 0, 1, 2],
+            [0, 2, 3], [ 3, 2, 8], [ 3, 8, 9], [ 3, 9, 4],
+            [4, 9, 10], [ 4, 10, 5], [ 5, 10, 6], [ 5, 6, 1],
+            [1, 6, 7], [ 1, 7, 2], [ 2, 7, 8], [ 8, 11, 9],
+            [9, 11, 10], [10, 11, 6], [ 6, 11, 7], [ 7, 11, 8] ])
+    else:
+        g = (1 + np.sqrt(5)) / 2  # Golden ratio
+        vtx = np.array([
+            [0, 1, g], [0, -1, g], [0, 1, -g], [0, -1, -g],
+            [1, g, 0], [-1, g, 0], [1, -g, 0], [-1, -g, 0],
+            [g, 0, 1], [g, 0, -1], [-g, 0, 1], [-g, 0, -1] ])
+        vtx = vtx / 2; # make edge = 1
+        fac = np.array([
+            [0, 1, 8], [0, 10, 1], [2, 9, 3], [2, 3, 11],
+            [1, 7, 6], [3, 6, 7], [5, 0, 4], [2, 5, 4],
+            [6, 9, 8], [8, 9, 4], [7, 10, 11], [5, 11, 10],
+            [1, 6, 8], [0, 8, 4], [10, 7, 1], [10, 0, 5],
+            [6, 3, 9], [7, 11, 3], [2, 4, 9], [2, 11, 5] ])
+    scaling = {
+            'e': value,
+            'af': np.sqrt(4 * value / np.sqrt(3)),
+            'at': np.sqrt(value / (5 * np.sqrt(3))),
+            'v': (12 * value / (5 * (3 + np.sqrt(5)))) ** (1/3),
+            'cr': 4 * value / np.sqrt(10 + 2 * np.sqrt(5)),
+            'ir': 12 * value / np.sqrt(42 + 18 * np.sqrt(5)) }
+    vtx = vtx * scaling[meas]
+    return vtx, fac
+
+# =============================================================================
+def icoup(vtx, fac, n, fsmode=True):
+    '''
+    Recursively upsample an icosahedron n times (will work also with tetra and octahedron).
+    If fsmode=True, the ordering of vertices and faces will match that of FreeSurfer.
+    n is the number of recursions, starting from the input vtx and fac
+    (not the final order of the geodesic sphere).
+    '''
+
+    # Get the radius (it should be the same for all vertices; take the mean just in case)
+    r = np.mean(np.linalg.norm(vtx, axis=1))
+
+    # Iterate over recursions
+    for _ in range(n):
+    
+        # Number of vertices, edges, and faces
+        nV1 = len(vtx)
+        nF1 = len(fac)
+        nE1 = nV1 + nF1 - 2
+        nF2 = 4*nF1
+    
+        # Vertices for each face
+        tri = vtx[fac]
+
+        # Fork to produce FreeSurfer-compatible spheres, or
+        # use a more convenient method
+        if fsmode:
+            
+            # Edge midpoints
+            midvtx = np.zeros((nE1*2,3))
+            newfac = np.zeros((nF2,3)).astype(int)
+            e1 = 0
+            f2 = 0
+            for f1 in range(nF1):
+                # Mid-edge vertices (new vertices, contain duplicates)
+                midvtx[e1+0] = (tri[f1,2] + tri[f1,0]) / 2
+                midvtx[e1+1] = (tri[f1,1] + tri[f1,2]) / 2
+                midvtx[e1+2] = (tri[f1,0] + tri[f1,1]) / 2
+                # New face indices, also with duplicates
+                newfac[f1]   = [fac[f1,0], e1+2+nV1,  e1+0+nV1]
+                newfac[f2+0+nF1]   = [e1+0+nV1,  e1+1+nV1,  fac[f1,2]]
+                newfac[f2+1+nF1]   = [e1+2+nV1,  e1+1+nV1,  e1+0+nV1]
+                newfac[f2+2+nF1]   = [e1+2+nV1,  fac[f1,1], e1+1+nV1]
+                e1 += 3
+                f2 += 3
+            
+            # Drop duplicated vertices
+            mixvtx = np.vstack([vtx, midvtx])
+            _, uidx, uinv = np.unique(mixvtx, axis=0, return_index=True, return_inverse=True)
+            sidx   = np.sort(uidx)
+            vtx    = mixvtx[sidx]
+            
+            # Renumber duplicated faces
+            aidx   = np.argsort(np.argsort(uidx))
+            sinv   = aidx[uinv]
+            fac    = sinv[newfac]
+
+        else:
+            # Edge midpoints
+            mid1 = (tri[:,0] + tri[:,1]) / 2
+            mid2 = (tri[:,1] + tri[:,2]) / 2
+            mid3 = (tri[:,2] + tri[:,0]) / 2
+            midvtx = np.vstack([mid1, mid2, mid3])
+            
+            # Drop duplicates, assemble new vertices
+            _, uidx = np.unique(np.round(midvtx, 10), axis=0, return_index=True)
+            newvtx = midvtx[uidx]
+            vtx = np.vstack([vtx, newvtx])
+            
+            # New faces
+            newfac = []
+            for i, f in enumerate(fac):
+                v0, v1, v2 = f
+                # Find indices of midpoints
+                m01 = np.argmin(np.sum((newvtx-mid1[i])**2, axis=1)) + nV1
+                m12 = np.argmin(np.sum((newvtx-mid2[i])**2, axis=1)) + nV1
+                m20 = np.argmin(np.sum((newvtx-mid3[i])**2, axis=1)) + nV1
+                # Create 4 new triangular faces
+                newfac.extend([
+                    [v0, m01, m20],
+                    [m01, v1, m12],
+                    [m20, m12, v2],
+                    [m01, m12, m20] ])
+            fac = np.array(newfac).astype(int)
+        
+        # Scale to unit norm then by the radius
+        vtx = vtx / np.linalg.norm(vtx, axis=1)[:,None] * r
+
+    return vtx, fac
+
+# =============================================================================
+def icodown(vtx, fac, ntarget):
+    '''
+    Downsample a surface from from a higher-order tessellated icosahedron to
+    a lower order one.
+
+    Parameters
+    ----------
+    vtx : NumPy array (num vertices by 3)
+        Vertex coordinates (x,y,z).
+    fac : NumPy array (num faces by 3)
+        Face indices (all faces are triangular).
+    ntarget : int
+        Icosahedron order of the downsampled surface.
+
+    Returns
+    -------
+    vtxnew : NumPy array (num vertices by 3)
+        Vertex coordinates (x,y,z) of the downsampled surface.
+    facnew : NumPy array (num faces by 3)
+        Face indices of the downsampled surface.
+    '''
+    
+    # Constants for the icosahedron
+    V0 = 12
+    F0 = 20
+    
+    # Current icosahedron order
+    nV = vtx.shape[0]
+    n  = round(np.log((nV-2)/(V0-2))/np.log(4))
+    
+    # Sanity check
+    if nV != 4**n*(V0-2)+2:
+        raise ValueError('Data not from icosahedron.')
+    elif ntarget >= n:
+        raise ValueError(f'This script only downsamples data (target order: {ntarget} / input order: {n}).')
+    
+    # Remove vertices (keep only those needed for target order)
+    nVnew = 4**ntarget * (V0 - 2) + 2
+    vtx = vtx[:nVnew,:]
+    
+    # Remove face indices by iteratively downsampling
+    for j in range(n-1, ntarget-1, -1):
+        nFj     = 4**j * F0
+        nVjprev = 4**(j+1) * (V0 - 2) + 2
+        nFjprev = 4**(j+1) * F0
+        remap = np.arange(nVjprev)
+        for f in range(nFjprev):
+            v1 = fac[f,0]
+            v2 = fac[f,1] 
+            v3 = fac[f,2]
+            remap[v1] = min(remap[v1],v2,v3)
+        facnew = np.zeros((nFj,3), dtype=int)
+        for f in range(nFj):
+            for v in range(3):
+                facnew[f,v] = remap[fac[f,v]]
+        fac = facnew
+    return vtx, fac

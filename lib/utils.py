@@ -6,6 +6,7 @@ Created on Sat May 31 20:27:37 2025
 @author: winkler
 """
 
+import numpy as np
 import time
 
 # =============================================================================
@@ -67,5 +68,42 @@ def progress_bar(current, total, start_time=None, bar_length=40, prefix='Progres
     # Add a newline when complete
     if current == total - 1:
         print()
-    
     return True
+
+# =============================================================================
+def sortrows(A, columns=None, ascending=True): # Note: AI-generated
+    """
+    Sort matrix rows like MATLAB's sortrows function
+    
+    Parameters:
+    A : ndarray - 2D array to sort
+    columns : int, list, or None - column(s) to sort by (0-indexed)
+    ascending : bool or list - sort direction(s)
+    
+    Returns:
+    ndarray - sorted array
+    """
+    if A.ndim != 2:
+        raise ValueError("Input must be 2D array")
+    
+    if columns is None:
+        # Sort by all columns, left to right
+        columns = list(range(A.shape[1]))
+    elif isinstance(columns, int):
+        columns = [columns]
+    
+    # Handle ascending parameter
+    if isinstance(ascending, bool):
+        ascending = [ascending] * len(columns)
+    
+    # Prepare sort keys (reverse order for lexsort)
+    sort_keys = []
+    for i, col in enumerate(reversed(columns)):
+        key = A[:, col]
+        if not ascending[len(columns) - 1 - i]:
+            key = -key  # Reverse sort by negating
+        sort_keys.append(key)
+    
+    # Sort and return
+    sort_indices = np.lexsort(sort_keys)
+    return A[sort_indices], sort_indices

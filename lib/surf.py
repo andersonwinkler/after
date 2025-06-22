@@ -427,7 +427,10 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
         # Confirm that the two principal directions are orthogonal to the normal
         # at this vertex. These two values must be zero; uncomment to test
         # print(np.dot(kd1[v,:],vtxn[v,:]), np.dot(kd2[v,:],vtxn[v,:]))
-    return {'k1':k1, 'k2':k2, 'kdir1':kd1, 'kdir2':kd2}
+        
+        # Output as a dict, that can be expanded with other metrics
+        curvs = {'k1':k1, 'k2':k2, 'kdir1':kd1, 'kdir2':kd2}
+    return curvs
 
 # =============================================================================
 def calc_composites(curvs):
@@ -485,6 +488,47 @@ def calc_composites(curvs):
     return curvs
 
 # =============================================================================
+def avg_edge_len_per_face(tri):
+    '''
+    Compute the average edge length of each face.
+    The input can be created as tri = vtx[fac]
+    '''
+    edges   = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
+    avglen = np.sqrt(np.sum(edges**2, axis=2))
+    avglen = np.mean(avglen, axis=1)
+    return avglen
+
+# =============================================================================
+def fractal_dimension(vtx, fac, fsmode=True):
+    
+    # Area per face and avg edge length in the original resolution
+    tri1   = vtx[fac]
+    area1  = signed_area(tri1)[0]
+    e1     = avg_edge_len_per_face(tri1)
+  
+    # Downsample these scalars
+    area1d = geom.dpxdown(area1, 1, fsmode=True)
+    e1d    = geom.dpxdown(e1, 1, fsmode=True)/4
+  
+    # Measure are in terms of edge lengths
+    N1d    = area1d/e1d/e1d
+  
+    # Downsample surface
+    vtx0, fac0 = geom.icodown(vtx, fac, 1)
+    
+    # Area per face and avg edge length downsampled of downsampled surface
+    tri0   = vtx0[fac0]
+    area0  = signed_area(tri0)[0]
+    e0     = avg_edge_len_per_face(tri0)
+    
+    # Measure are in terms of edge lengths
+    N0 = area0/e0/e0
+    
+    # Fractal dimension, per downsampled face
+    D = -np.log(N1d/N0)/np.log(e1d/e0)
+    return D
+
+# =============================================================================
 def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
     '''
     Retessellate a mesh.
@@ -510,7 +554,6 @@ def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
     -------
     vtx4 : NumPy array (num vertices by 3)
         Vertex coordinates of the retessellated mesh. Its face indices are fac2.
-
     '''
 
     # Default margin
@@ -614,5 +657,3 @@ def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
                 # Weight by the areas and interpolate the value between the 3 vertices
                 vtx4[Cidxi[v], :] = np.dot([aA, aB, aC], vtx3[vidx, :]) / aT
     return vtx4
-
-

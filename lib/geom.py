@@ -7,6 +7,9 @@ Created on Sat Jun  7 18:27:11 2025
 '''
 
 import numpy as np
+import math
+
+from . import utils
 
 # =============================================================================
 def line_intersection(A,B,C,D):
@@ -235,12 +238,31 @@ def icoup(vtx, fac, n, fsmode=True):
     If fsmode=True, the ordering of vertices and faces will match that of FreeSurfer.
     n is the number of recursions, starting from the input vtx and fac
     (not the final order of the geodesic sphere).
+    
+    Parameters
+    ----------
+    vtx : NumPy array (num vertices by 3)
+        Vertex coordinates (x,y,z).
+    fac : NumPy array (num faces by 3)
+        Face indices (all faces are triangular).
+    n : int
+        Number of times it will be iteratively upsampled.
+    fsmode : bool
+        Whether to order vertices and faces in the same scheme used by FreeSurfer
+        in fsaverage. Not the most convenient but good for compatibility.
+        
+    Returns
+    -------
+    vtxnew : NumPy array (num vertices by 3)
+        Vertex coordinates (x,y,z) of the upsampled surface.
+    facnew : NumPy array (num faces by 3)
+        Face indices of the upsampled surface.    
     '''
 
     # Get the radius (it should be the same for all vertices; take the mean just in case)
     r = np.mean(np.linalg.norm(vtx, axis=1))
 
-    # Iterate over recursions
+    # Iterate over recursions (n times)
     for _ in range(n):
     
         # Number of vertices, edges, and faces
@@ -267,10 +289,10 @@ def icoup(vtx, fac, n, fsmode=True):
                 midvtx[e1+1] = (tri[f1,1] + tri[f1,2]) / 2
                 midvtx[e1+2] = (tri[f1,0] + tri[f1,1]) / 2
                 # New face indices, also with duplicates
-                newfac[f1]   = [fac[f1,0], e1+2+nV1,  e1+0+nV1]
-                newfac[f2+0+nF1]   = [e1+0+nV1,  e1+1+nV1,  fac[f1,2]]
-                newfac[f2+1+nF1]   = [e1+2+nV1,  e1+1+nV1,  e1+0+nV1]
-                newfac[f2+2+nF1]   = [e1+2+nV1,  fac[f1,1], e1+1+nV1]
+                newfac[f1]       = [fac[f1,0], e1+2+nV1,  e1+0+nV1]
+                newfac[f2+0+nF1] = [e1+0+nV1,  e1+1+nV1,  fac[f1,2]]
+                newfac[f2+1+nF1] = [e1+2+nV1,  e1+1+nV1,  e1+0+nV1]
+                newfac[f2+2+nF1] = [e1+2+nV1,  fac[f1,1], e1+1+nV1]
                 e1 += 3
                 f2 += 3
             
@@ -319,7 +341,7 @@ def icoup(vtx, fac, n, fsmode=True):
     return vtx, fac
 
 # =============================================================================
-def icodown(vtx, fac, ntarget):
+def icodown(vtx, fac, n):
     '''
     Downsample a surface from from a higher-order tessellated icosahedron to
     a lower order one.
@@ -330,8 +352,8 @@ def icodown(vtx, fac, ntarget):
         Vertex coordinates (x,y,z).
     fac : NumPy array (num faces by 3)
         Face indices (all faces are triangular).
-    ntarget : int
-        Icosahedron order of the downsampled surface.
+    n : int
+        Number of times it will be iteratively downsampled.
 
     Returns
     -------
@@ -345,34 +367,248 @@ def icodown(vtx, fac, ntarget):
     V0 = 12
     F0 = 20
     
-    # Current icosahedron order
-    nV = vtx.shape[0]
-    n  = round(np.log((nV-2)/(V0-2))/np.log(4))
+    # Iterate over recursions (n times)
+    for _ in range(n):
     
-    # Sanity check
-    if nV != 4**n*(V0-2)+2:
-        raise ValueError('Data not from icosahedron.')
-    elif ntarget >= n:
-        raise ValueError(f'This script only downsamples data (target order: {ntarget} / input order: {n}).')
-    
-    # Remove vertices (keep only those needed for target order)
-    nVnew = 4**ntarget * (V0 - 2) + 2
-    vtx = vtx[:nVnew,:]
-    
-    # Remove face indices by iteratively downsampling
-    for j in range(n-1, ntarget-1, -1):
-        nFj     = 4**j * F0
-        nVjprev = 4**(j+1) * (V0 - 2) + 2
-        nFjprev = 4**(j+1) * F0
-        remap = np.arange(nVjprev)
-        for f in range(nFjprev):
-            v1 = fac[f,0]
-            v2 = fac[f,1] 
-            v3 = fac[f,2]
+        # Current icosahedron order
+        nV    = vtx.shape[0]
+        nF    = fac.shape[0]
+        order = round(np.log((nV-2)/(V0-2))/np.log(4))
+        
+        # Remove vertices (keep only those needed for target order)
+        nVnew = 4**(order-1) * (V0 - 2) + 2
+        vtx   = vtx[:nVnew,:]
+        
+        # Remove face indices
+        nFnew = 4**(order-1) * F0
+        remap = np.arange(nV)
+        for f in range(nF):
+            v1, v2, v3 = fac[f,:]
             remap[v1] = min(remap[v1],v2,v3)
-        facnew = np.zeros((nFj,3), dtype=int)
-        for f in range(nFj):
+        facnew = np.zeros((nFnew,3), dtype=int)
+        for f in range(nFnew):
             for v in range(3):
                 facnew[f,v] = remap[fac[f,v]]
         fac = facnew
     return vtx, fac
+
+# =============================================================================
+def dpxdown(dpx, n, vtx=None, fac=None, fsmode=True, pycno=False):
+    '''
+    Downsample scalar field over a surface. Can be vertexwise or facewise.
+
+    Parameters
+    ----------
+    dpx : NumPy vector
+        Data to be downsampled (vertexwise or facewise)
+    n : int
+        Number of iterations
+    vtx : NumPy array, num vertices by 3, optional
+        Vertex coordinates, needed if downsampling non-FreeSurfer facewise data.
+        The default is None.
+    fac : NumPy array, num faces by 3, optional
+        Face indices, needed if downsampling non-FreeSurfer facewise data.
+        The default is None.
+    fsmode : bool, optional
+        Indicate if we are working with FreeSurfer ordering of vertices and indices.
+        Since the ordering doesn't need to be inferred, it works much faster.
+        The default is True.
+    pycno : bool, optional
+        For vertexwise data, use a mass-conservative (pycnophylactic) method.
+        The default is False.
+
+    Returns
+    -------
+    dpxnew : NumPy vector
+        Downsampled data.
+    '''
+    # Constants for the icosahedron
+    V0 = 12
+    F0 = 20
+    E0 = 30
+    
+    # Discover what kind of data this is
+    nX = len(dpx)
+    if fac is None:
+        orderv = math.log2((nX-2)/(V0-2))/2
+        orderf = math.log2(nX/F0)/2
+        ordere = math.log2(nX/E0)/2
+        if orderv == np.round(orderv):
+            dtype = 'dpv'
+            order = orderv
+        elif orderf == np.round(orderf):
+            dtype = 'dpf'
+            order = orderf
+        elif ordere == np.round(ordere):
+            dtype = 'dpe'
+            order = ordere
+        else:
+            raise ValueError('Number of datapoints does not match an icosahedron.')
+        nV = 4**order*(V0-2)+2
+        nF = 4**order*F0
+        nE = 4**order*E0
+        if vtx is not None and nV != vtx.shape[0]:
+            raise ValueError('Vertex coordinate array does not match the size of the data')
+    else:
+        nV = int(np.max(fac))+1
+        nF = len(fac)
+        nE = nV + nF - 2
+        if  nX == nV:
+            dtype = 'dpv'
+            order = math.log2((nX-2)/(V0-2))/2
+        elif nX == nF:
+            dtype = 'dpf'
+            order = math.log2(nX/F0)/2
+        elif nX == nE:
+            dtype = 'dpe'
+            order = math.log2(nX/E0)/2
+        else:
+            raise ValueError('Number of datapoints does not match the face indices provided.')
+        if vtx is not None and nV != vtx.shape[0]:
+            raise ValueError('Vertex coordinate array does not match the size of the data')
+        
+    if dtype == 'dpv':
+        for _ in range(n):
+            nVnew  = 4**(order-1)*(V0-2)+2
+            dpxnew = dpx[0:nVnew]
+            if pycno:
+                dpxadd = np.zeros(dpxnew.shape)
+                facs   = np.sort(fac, axis=1)
+                idx    = facs[:,0] < nVnew
+                np.add.at(dpxadd, facs[idx,0], dpx[facs[idx,1]])
+                np.add.at(dpxadd, facs[idx,0], dpx[facs[idx,2]])
+                dpx    = dpxnew + dpxadd/4
+            order -= 1
+                
+    elif dtype == 'dpf':
+        for _ in range(n):
+            nF    = len(dpx)
+            nFnew = int(4**(order-1)*F0)
+            if fsmode: # if we know it's FreeSurfer, it's much faster
+                dpxnew = dpx[0:nFnew]
+                dpx = dpxnew + np.sum(dpx[nFnew:].reshape((nFnew,3), order='C'), axis=1)
+            else:
+                import sparse
+                if hasattr(fac, 'dtype') and fac.dtype.byteorder == '>':
+                    fac = fac.astype(np.int32)
+                
+                # Lookup tables showing:
+                # - for each face given the vertex indices, the face index
+                # - for each vertex pair to be deleted, the vertex that stays
+                facs, idx = utils.sortrows(np.sort(fac, axis=1))
+                lutf  = sparse.COO(facs.T, np.arange(nF)[idx], (nF,nF,nF))
+                lutv  = sparse.COO(facs[:nFnew*3,1:].T, facs[:nFnew*3,0], (nFnew*3,nFnew*3))
+                
+                # Downsample
+                vtxd, facd = icodown(vtx, fac, 1)
+                
+                # Lookup table showing the face number given the vertex indices
+                facds = np.sort(facd, axis=1)
+                lutd  = sparse.COO(facds.T, np.arange(nFnew), (nFnew, nFnew, nFnew))
+                
+                # Populate the new dpx
+                dpxnew = np.zeros(nFnew)
+                for f in range(nFnew*3, nF, 1):
+                    v1 = lutv[facs[f,0],facs[f,1]]
+                    v2 = lutv[facs[f,1],facs[f,2]]
+                    v3 = lutv[facs[f,0],facs[f,2]]
+                    sv1, sv2, sv3 = sorted([v1, v2, v3])
+                    ft = lutd[sv1, sv2, sv3] # target face
+                    dpxnew[ft] += dpx[lutf[ facs[f,0], facs[f,1], facs[f,2] ]]
+                    dpxnew[ft] += dpx[lutf[ sv1,       facs[f,0], facs[f,1] ]]
+                    dpxnew[ft] += dpx[lutf[ sv2,       facs[f,1], facs[f,2] ]]
+                    dpxnew[ft] += dpx[lutf[ sv3,       facs[f,0], facs[f,2] ]]
+                vtx = vtxd
+                fac = facd
+                dpx = dpxnew
+            order -= 1
+            
+    elif dtype == 'dpe':
+        raise ValueError('Downsampling for edgewise data has not yet been implemented')
+    return dpx
+
+# =============================================================================
+def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
+    
+    nV  = np.max(fac) + 1
+    
+    # If no upsampling is required
+    if facu is None:
+        facflat = fac.flatten()
+        dpv     = np.zeros(nV)
+        cnt     = np.zeros(nV)
+        np.add.at(dpv, facflat, np.tile(dpf[:,None],(1,3)).flatten())
+        np.add.at(cnt, facflat, 1)
+        if pycno:
+            # Redistribute by a factor of 1/3
+            dpv /= 3
+            # Scale factor to account for some vertices receiving data from
+            # different number of faces (5 or 6)
+            s   = np.sum(cnt)/nV/cnt
+            dpv = dpv*s
+        else:
+            # Average by the number of faces that meet at that vertex
+            dpv /= cnt
+    else:
+        # # Edges represented by their vertex indices
+        # evtx = np.unique(np.sort(np.concatenate((
+        #        np.stack((fac[:,0], fac[:,1]), axis=1),
+        #        np.stack((fac[:,1], fac[:,2]), axis=1),
+        #        np.stack((fac[:,0], fac[:,2]), axis=1)), axis=0), axis=1), axis=0)
+        # # Edges represented by the indices of faces that touch at that edge
+        # efac = np.zeros(evtx.shape).astype(int)
+        # for eidx, e in enumerate(evtx):
+        #     efac[eidx] = np.where(np.sum(np.logical_or(fac == e[0], fac == e[1]), axis=1).astype(int) == 2)[0]
+        # # Neighbors of the lowres vertices in the highres
+        # facus = utils.sortrows(np.sort(facu, axis=1))[0]
+        # neig = {}
+        # for v in range(nV):
+        #     idx = facus[:,0] == v
+        #     neig[v] = facus[idx,1:].flatten()
+        # # Vertex index of the midpoint of the edge
+        # emid = np.zeros(evtx.shape[0])
+        # for eidx, e in enumerate(evtx):
+        #     emid[eidx] = np.intersect1d(neig[e[0]], neig[e[1]])[0]
+        
+        # Find additional vertex indices (of the edge midpoints) that the data
+        # from this face needs to be interpolated to
+        nVu = np.max(facu) + 1
+        nF  = fac.shape[0]
+        if fsmode:
+            idx  = np.arange(facu.shape[0])
+            idx = idx[nF:].reshape((nF,3), order='C')[:,1]
+            faca = facu[idx]
+        else:
+            # Neighbors of the lowres vertices in the highres
+            facus = utils.sortrows(np.sort(facu, axis=1))[0]
+            neig = {}
+            for v in range(nV):
+                idx = facus[:,0] == v
+                neig[v] = facus[idx,1:].flatten()
+            # Find the edge midpoints
+            faca = np.zeros(fac.shape).astype(int)
+            for f in range(nF):
+                v1, v2, v3 = fac[f]
+                faca[f,0] = np.intersect1d(neig[v1], neig[v2])[0]
+                faca[f,1] = np.intersect1d(neig[v2], neig[v3])[0]
+                faca[f,2] = np.intersect1d(neig[v1], neig[v3])[0]
+        # Now that we know these midpoint vertex indices, we can interpolate
+        facflat  = fac.flatten()
+        facaflat = faca.flatten()
+        dpv      = np.zeros(nVu)
+        cnt      = np.zeros(nVu)
+        np.add.at(dpv, facflat,  np.tile(dpf[:,None],(1,3)).flatten())
+        np.add.at(dpv, facaflat, np.tile(dpf[:,None],(1,3)).flatten())
+        np.add.at(cnt, facflat,  1)
+        np.add.at(cnt, facaflat, 1)
+        if pycno:
+            # Redistribute by a factor of 1/6 (since we have 6 vertices)
+            dpv /= 6
+            # Scale factor to account for some vertices receiving data from
+            # different number of faces (5 or 6)
+            s   = np.sum(cnt)/nVu/cnt
+            dpv = dpv*s
+        else:
+            # Average by the number of faces that meet at that vertex
+            dpv /= cnt
+    return dpv

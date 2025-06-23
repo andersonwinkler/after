@@ -29,7 +29,7 @@ if __name__ == '__main__':
                         help='Moving surface; displacement vectors will be computed the reference to this.',
                         type=str, required=False, default=None)
     parser.add_argument('--out',
-                        help='Output file (FreeSurfer "curvature" format).',
+                        help='Output file prefix (FreeSurfer "curvature" format).',
                         type=str, required=False, default=None)
     args  = parser.parse_args()
     
@@ -56,5 +56,4 @@ if __name__ == '__main__':
     dist = np.sum(vec**2, axis=1)
 
     # Save output surface
-    lib.io.write_curv(args.out, dist, vec=None, use_ascii=False)
-    lib.io.write_curv(args.out + '.dpv', dist, vec=vec, use_ascii=True)
+    lib.io.write_curv(args.out, dist, vec=vec, use_ascii=False)

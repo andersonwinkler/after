@@ -12,84 +12,6 @@ import math
 from . import utils
 
 # =============================================================================
-def line_intersection(A,B,C,D):
-    '''
-    Compute the coordinates of the intersection between line segments AB and CD.
-    Returns also parameters s and t. If these are between 0 and 1, the intersection
-    is, respectively, within AB and CD.
-    Implementation based on:
-        * Vince J. Foundation Mathematics for Computer Science.
-          4th ed. Springer, 2024. Chapter 20, pp 417-419.
-
-    Parameters
-    ----------
-    A : NumPy array (N by 3)
-        Cartesian coordinates of point A.
-    B : NumPy array (N by 3)
-        Cartesian coordinates of point B.
-    C : NumPy array (N by 3)
-        Cartesian coordinates of point C.
-    D : NumPy array (N by 3)
-        Cartesian coordinates of point D.
-
-    Returns
-    -------
-    P : NumPy array (N by 3)
-        Cartesian coordinates of intersection point P.
-    '''
-    # Find the parameters s and t via least squares. This avoids having to figure
-    # out if there are dependent equations
-    N    = A.shape[0]
-    dat  = np.concatenate((A[:,0]-C[:,0],A[:,1]-C[:,1],A[:,2]-C[:,2])).reshape((N,3), order='F')
-    scol = np.concatenate((D[:,0]-C[:,0],D[:,1]-C[:,1],D[:,2]-C[:,2])).reshape((N,3), order='F')
-    tcol = np.concatenate((A[:,0]-B[:,0],A[:,1]-B[:,1],A[:,2]-B[:,2])).reshape((N,3), order='F')
-    des  = np.concatenate((scol[:,:,None], tcol[:,:,None]), axis=2)
-    st   = np.zeros((N,2)) # for the terms s and t of the parameterization
-    rnk  = np.zeros((N))
-    for p in range(A.shape[0]):
-        st[p], _, rnk[p], _ = np.linalg.lstsq(des[p,:,:], dat[p,:], rcond=None)
-    
-    # Mark parallel lines with None
-    st[rnk < 2] = None
-    
-    # Intersection point
-    # It can be computed using A, B and t, or using C, D, and s
-    # Results should be the same
-    #Pt = A + st[:,1,None]*(B-A)
-    #Ps = C + st[:,0,None]*(D-C)
-    P   = C + st[:,0,None]*(D-C)
-    return P, st[:,0], st[:,1]
-
-# =============================================================================
-def normal2zaxis(n):
-    '''
-    Compute a 3x3 rotation matrix that changes the coordinate system such
-    that n @ rot is a new coordinate system with the z-axis along n.
-
-    Parameters
-    ----------
-    n : Input vector
-
-    Returns
-    -------
-    rot : Rotation matrix
-    '''
-    n     /= np.linalg.norm(n)
-    z      = np.array([0,0,1])
-    axis   = np.cross(z,n)
-    naxis  = np.linalg.norm(axis)
-    if naxis > 0:
-        axis  /= naxis
-    angle  = np.arccos(np.clip(np.dot(z,n),-1,1))
-    K = np.array([
-        [   0 ,    -axis[2],  axis[1]],
-        [ axis[2],       0 , -axis[0]],
-        [-axis[1],  axis[0],       0]])
-    rot    = np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
-    return rot
-
-# =============================================================================
-# Functions to create Platonic polihedra
 def tetrahedron(meas='e', value=1):
     '''Generate tetrahedron vertices and faces.'''
     vtx = np.array([
@@ -113,6 +35,7 @@ def tetrahedron(meas='e', value=1):
     vtx = vtx * scaling[meas]
     return vtx, fac
 
+# -----------------------------------------------------------------------------
 def hexahedron(meas='e', value=1):
     '''Generate hexahedron (cube) vertices and faces.'''
     vtx = np.array([
@@ -136,6 +59,7 @@ def hexahedron(meas='e', value=1):
     vtx = vtx * scaling[meas]
     return vtx, fac
 
+# -----------------------------------------------------------------------------
 def octahedron(meas='e', value=1):
     '''Generate octahedron vertices and faces.'''
     vtx = np.array([
@@ -155,6 +79,7 @@ def octahedron(meas='e', value=1):
     vtx = vtx * scaling[meas]
     return vtx, fac
 
+# -----------------------------------------------------------------------------
 def dodecahedron(meas='e', value=1):
     '''Generate dodecahedron vertices and faces.'''
     g = (1 + np.sqrt(5)) / 2  # Golden ratio
@@ -180,6 +105,7 @@ def dodecahedron(meas='e', value=1):
     vtx = vtx * scaling[meas]
     return vtx, fac
 
+# -----------------------------------------------------------------------------
 def icosahedron(meas='e', value=1, fsmode=True):
     '''
     Generate icosahedron vertices and faces.
@@ -529,7 +455,32 @@ def dpxdown(dpx, n, vtx=None, fac=None, fsmode=True, pycno=False):
 
 # =============================================================================
 def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
+    '''
+    Convert facewise to vertexwise.
+
+    Parameters
+    ----------
+    dpf : NumPy vector
+        Data per face to be converted to vertexwise.
+    fac : NumPy array (num faces by 3)
+        Vertex indices that form each face.
+    facu : NumPy array (num faces "up" by 3), optional
+        Similar to fac but with 4x more faces, for the icosahedron one
+        order upward. Needed if we want to sample to vertexwise at
+        that upward resolution
+    pycno : Bool, optional
+        Whether to use a mass-conservative (pycnophylactic) method.
+        The default is False.
+    fsmode : Bool, optional
+        Assume face indices follow FreeSurfer structure. The default is True.
+
+    Returns
+    -------
+    dpv : NumPy vector
+        Data resampled to vertexwise.
+    '''
     
+    # Number of vertices
     nV  = np.max(fac) + 1
     
     # If no upsampling is required
@@ -550,26 +501,6 @@ def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
             # Average by the number of faces that meet at that vertex
             dpv /= cnt
     else:
-        # # Edges represented by their vertex indices
-        # evtx = np.unique(np.sort(np.concatenate((
-        #        np.stack((fac[:,0], fac[:,1]), axis=1),
-        #        np.stack((fac[:,1], fac[:,2]), axis=1),
-        #        np.stack((fac[:,0], fac[:,2]), axis=1)), axis=0), axis=1), axis=0)
-        # # Edges represented by the indices of faces that touch at that edge
-        # efac = np.zeros(evtx.shape).astype(int)
-        # for eidx, e in enumerate(evtx):
-        #     efac[eidx] = np.where(np.sum(np.logical_or(fac == e[0], fac == e[1]), axis=1).astype(int) == 2)[0]
-        # # Neighbors of the lowres vertices in the highres
-        # facus = utils.sortrows(np.sort(facu, axis=1))[0]
-        # neig = {}
-        # for v in range(nV):
-        #     idx = facus[:,0] == v
-        #     neig[v] = facus[idx,1:].flatten()
-        # # Vertex index of the midpoint of the edge
-        # emid = np.zeros(evtx.shape[0])
-        # for eidx, e in enumerate(evtx):
-        #     emid[eidx] = np.intersect1d(neig[e[0]], neig[e[1]])[0]
-        
         # Find additional vertex indices (of the edge midpoints) that the data
         # from this face needs to be interpolated to
         nVu = np.max(facu) + 1

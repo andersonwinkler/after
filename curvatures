@@ -102,11 +102,13 @@ if __name__ == "__main__":
                         vtx = obj['v']
                         fac = obj['f']
                     elif intype == 'surf' or filein.lower().endswith(knownsurfs):
-                        vtx, fac, _, _ = lib.io.read_surf(filein)
+                        vtx, fac, info, _ = lib.io.read_surf(filein)
+                        vtx = vtx + info['cras']
                 else:
                     filein = os.path.join(subjdir, subj, 'surf', '{}.{}'.format(h, srf))
                     print('Reading input file: {}'.format(filein))
-                    vtx, fac, _, _ = lib.io.read_surf(filein)
+                    vtx, fac, info, _ = lib.io.read_surf(filein)
+                    vtx = vtx + info['cras']
                     
                 # Compute vertex normals
                 print('Computing face and vertex normals using the Max (1999) algorithm')
@@ -125,7 +127,17 @@ if __name__ == "__main__":
                 curvs = lib.surf.calc_composites(curvs)
                 
                 # Include Voronoi areas in the set, so it's easier to save
-                curvs['varea'] = vorv
+                curvs['voronoi_area'] = vorv
+                
+                # Compute the fractal dimension. Results will be for
+                # one level of resolution down, facewise
+                print('Computing facewise fractal dimension using an inhouse algorithm')
+                FD = lib.surf.fractal_dimension(vtx, fac, fsmode=True)
+                
+                # Upsample just slightly to vertexwise in the resolution of the original mesh
+                print('Converting facewise fractal dimension to vertexwise')
+                _, facd = lib.platonic.icodown(vtx, fac, 1)
+                curvs['FD'] = lib.platonic.dpf2dpv(FD, facd, facu=fac, pycno=False, fsmode=True)
                 
                 # Save results
                 if subj is None or h is None:

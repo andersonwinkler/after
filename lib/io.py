@@ -46,7 +46,7 @@ def read_annot(filein, orig_ids=False):
 # =============================================================================
 def read_curv(filein, use_ascii=False):
     if use_ascii:
-        ...
+        ... # XXX to do
     else:
         curv = nib.freesurfer.io.read_morph_data(filein)
     return curv

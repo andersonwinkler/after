@@ -23,7 +23,7 @@ Options:
 --sd <subjects directory>
   Specify the subjects directory if not the one defined by the environmental
   variable SUBJECTS_DIR.
-  Note that either SUBJECTS_DIR must have been correctly set, --sd must be
+  Note that either SUBJECTS_DIR must have been correctly set, or --sd must be
   provided with the path to the directory that contains all subjects.
   
 --sdnew <subjects directory>
@@ -40,8 +40,8 @@ Options:
 
 --retessellate
   Do the retessellation to fsaverage. Data must have been processed with
-  recon-all up to the point where the surface registration is performed
-  (?h.sphere.reg must exist).
+  recon-all past the point in which the surface registration is performed
+  (that is, ?h.sphere.reg must exist).
 
 --curvatures
   Compute various curvature metrics and their composites. The ?h.white
@@ -50,17 +50,15 @@ Options:
 --lgi
   Compute the local gyrification index (following Schaer et al., 2008).
   
---fd
-  Compute the fractal dimension.
-  
 --myelin
   Compute proxy measures for myelin based on T2 or FLAIR either of these
   modalities were originally imported with the options --T2 or --FLAIR in
   recon-all. It is not necessary that the flags --T2pial or --FLAIR pial were
   originally used.
   
---subseg
-  Run scripts that do subsegmentation of amygala, thalamys, hippocampus.
+--subregions
+  Run scripts that do subsegmentation of the amygala, thalamus, hippocampus,
+  and brain stem.
   
 --pve
   Compute measures of partial volume effects of GM, WM, and CSF for subcortical
@@ -149,9 +147,8 @@ DOBASE=false            # Do a basic reconstruction up to surface registration
 DORETESSELLATE=false    # Do the retessellation
 DOCURVATURES=false      # Compute the better curvatures and their composites
 DOLGI=false             # Compute the LGI
-DOFRACTAL=false         # Compute the fractal dimension
 DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
-DOSUBSEG=false          # Run substructure segmentations
+DOSUBREG=false          # Run substructure segmentations
 DOPVE=false             # Compute partial volume effects
 DOVIEWS=false           # Capture views for later inspection
 PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
@@ -196,12 +193,12 @@ while [[ ${#} -gt 0 ]] ; do
       DOLGI=true
       shift
       ;;
-   -fd|--fd|-fractal|--fractal)
-      DOFRACTAL=true
-      shift
-      ;;
    -myelin|--myelin)
       DOMYELIN=true
+      shift
+      ;;
+   -subregions|--subregions)
+      DOSUBREG=true
       shift
       ;;
    -views|--views)
@@ -419,7 +416,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    for h in lh rh ; do
       ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
                            --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
-                           --out ${SUBJECTS_DIR}/${subj}/after/${h}.reposition_displacement
+                           --out ${SUBJECTS_DIR}/${subj}/after/${h}.orig2whitepreaparc
    done
 fi
 
@@ -458,25 +455,18 @@ if ${DOLGI} || ${DOALL} ; then
 fi
 
 # =====================================================================
-# Compute the fractal dimension
-if ${DOFRACTAL} || ${DOALL} ; then
-
-   # Check we have all files needed for this step
-   FILELIST=(
-      ${SUBJECTS_DIR}/${subj}/surf/lh.pial
-      ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
-   checkfiles ${FILELIST} "computation of the FD"
-
-   # Compute the FD proper
-   echo "Ongoing work -- fdic"
+# Compute the myelin proxy. There's no need to check if files exist as
+# that will be done by melina.
+if ${DOMYELIN} || ${DOALL} ; then
+   ${AFTERDIR}/melina -s ${subj} -c
 fi
 
 # =====================================================================
-# Compute the myelin proxy
-if ${DOMYELIN} || ${DOALL} ; then
-
-   # Note there's no need to check if files exist as that will be done by melina.
-   ${AFTERDIR}/melina -s ${subj} -c
+# Do the segmentation of subregions
+if ${DOSUBREG} || ${DOALL} ; then
+   ${FREESURFER_HOME}/bin/segment_subregions thalamus       --cross "${subj}" -sd "${SUBJECTS_DIR}"
+   ${FREESURFER_HOME}/bin/segment_subregions hippo-amygdala --cross "${subj}" -sd "${SUBJECTS_DIR}"
+   ${FREESURFER_HOME}/bin/segment_subregions brainstem      --cross "${subj}" -sd "${SUBJECTS_DIR}"
 fi
 
 # =====================================================================
@@ -486,7 +476,6 @@ if ${DOVIEWS} || ${DOALL} ; then
    (${DORETESSELLATE} || ${DOALL}) && OPTS="${OPTS} --retessellation"
    (${DOCURVATURES}   || ${DOALL}) && OPTS="${OPTS} --curvatures"
    (${DOLGI}          || ${DOALL}) && OPTS="${OPTS} --lgi"
-   (${DOFRACTAL}      || ${DOALL}) && OPTS="${OPTS} --fd"
    (${DOMYELIN}       || ${DOALL}) && OPTS="${OPTS} --myelin"
    ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi

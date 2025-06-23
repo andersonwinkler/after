@@ -7,14 +7,14 @@ Created on Sat Jun 21 14:40:30 2025
 """
 import os
 from . import io
-from . import geom
+from . import platonic
 
 def make_fine_fsaverage(outdir=None):
     '''
     Make fsaverage surfaces (icosahedrons recursively subdivided) and save them
     in the module's tree structure. These are "finer" than the original shipped
     with FreeSurfer in that vertex coordinates have more decimal places, and
-    recursions span all range 0-9, as opposed to only 3-7.
+    recursions span the range 0-9, as opposed to 3-7.
     Instead of lh and rh (which are identical), saves as "xh".
     '''
     
@@ -33,11 +33,11 @@ def make_fine_fsaverage(outdir=None):
     
     # Create and save fsaverage0 (no subdivision)
     print('Working on subdivision 0')
-    vtx, fac = geom.icosahedron(meas='cr', value=100, fsmode=True)
+    vtx, fac = platonic.icosahedron(meas='cr', value=100, fsmode=True)
     io.write_surf(os.path.join(outdir, 'xh.fsaverage0.fine.sphere.reg'), vtx, fac, info)
     
     # Recursively subdivide and save
     for n in range(1,10):
         print(f'Working on subdivision {n}')
-        vtx, fac = geom.icoup(vtx, fac, 1, fsmode=True)
+        vtx, fac = platonic.icoup(vtx, fac, 1, fsmode=True)
         io.write_surf(os.path.join(outdir, f'xh.fsaverage{n}.fine.sphere.reg'), vtx, fac, info)

@@ -219,14 +219,14 @@ done
 # =====================================================================
 # Confirm we have FreeSurfer available
 if [[ ! -e ${FREESURFER_HOME}/bin/recon-all ]] ; then
-   echo "Error: FreeSurfer not correctly configured. Stopping."
+   echo "Error: FreeSurfer not correctly configured."
    exit 1
 fi
 
 # Confirm we have FSL available
 if ${DOALL} || ${DOMYELIN} ; then
    if [[ ! -e ${FSLDIR}/bin/fslmaths ]] ; then
-      echo "Error: FSL not correctly configured. Stopping."
+      echo "Error: FSL not correctly configured."
       exit 1
    fi
 fi
@@ -240,21 +240,32 @@ fi
 # The logic of starting a new subject from scratch (--indir) isn't compatible
 # with copying from an existing to a new subjects dir (--sdnew)
 if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ ! -z "${IN_DIR}" ]] ; then
-   echo "Error: Cannot use --indir together with --sdnew."
+   echo "Error: Cannot use --indir together with --sdnew. If you want to start"
+   echo "       fresh in a different SUBJECTS_DIR, use --indir with --sd."
    exit 1
 fi
 
-# We don't want to overwrite
-if [[ ! -z "${IN_DIR}" ]] && [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+# We don't want to overwrite when importing new data
+if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] && [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
    echo "Error: Directory already exists: ${SUBJECTS_DIR}/${subj}"
-   echo "       Will not import new data with --indir. Delete it manually first. Stopping."
+   echo "       Will not import new data with --indir. Delete manually first."
    exit 1
 fi
+
+# We don't want to overwrite in --sdnew (would defeat the purpose)
 if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] ; then
    NEW_SUBJECTS_DIR=$(readlink -f "${NEW_SUBJECTS_DIR}")
    if [[ -d "${NEW_SUBJECTS_DIR}/${subj}" ]] ; then
       echo "Error: Directory already exists: ${NEW_SUBJECTS_DIR}/${subj}."
-      echo "       Will not overwrite with --sdnew. Delete it manually first. Stopping."
+      echo "       Will not overwrite with --sdnew. Delete manually first."
+   fi
+fi
+
+# If we will copy into a new SUBJECTS_DIR, the original must exist
+if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] ; then
+   if [[ ! -d "${SUBJECTS_DIR}/${subj}" ]] ; then
+      echo "Error: Directory not found: ${SUBJECTS_DIR}/${subj}"
+      echo "       It must exist before it can be copied into ${NEW_SUBJECTS_DIR}."
    fi
 fi
 
@@ -270,32 +281,30 @@ fi
 # =====================================================================
 # Locate input data if we provided an input directory
 if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] ; then
-   if [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
-      echo "Directory already exists: ${SUBJECTS_DIR}/${subj}. Stopping."
-   fi
-   T1W_LIST=$(find ${IN_DIR}/${subj} -name *_T1w.nii.gz  |sort)
-   T2W_LIST=$(find ${IN_DIR}/${subj} -name *_T2w.nii.gz  |sort)
-   FLA_LIST=$(find ${IN_DIR}/${subj} -name *_FLAIR.nii.gz|sort)
+   T1W_LIST=$(find -L ${IN_DIR}/${subj} -name \*_T1w.nii.gz  |sort)
+   T2W_LIST=$(find -L ${IN_DIR}/${subj} -name \*_T2w.nii.gz  |sort)
+   FLA_LIST=$(find -L ${IN_DIR}/${subj} -name \*_FLAIR.nii.gz|sort)
    IN_T1W=""
    for f in ${T1W_LIST} ; do
-      IN_T1W="${IN_T1W} -i ${f}"
+      IN_T1W="${IN_T1W} -i $(readlink -f ${f})"
    done
    IN_T2W=""
    for f in ${T2W_LIST} ; do
-      IN_T2W="${IN_T2W} -T2 ${f}"
+      IN_T2W="${IN_T2W} -T2 $(readlink -f ${f})"
    done
    IN_FLA=""
    for f in ${FLA_LIST} ; do
-      IN_FLA="${IN_FLA} -FLAIR ${f}"
+      IN_FLA="${IN_FLA} -FLAIR $(readlink -f ${f})"
    done
 fi
+[[ ! -z "${IN_T1W}" ]] && DOBASE=true
 
 # =====================================================================
 # Run an initial FreeSurfer call
-if ${DOBASE} || [[ ! -z "${IN_T1W}" ]] ; then
+if ${DOBASE} || ${DOALL} ; then
 
-   # Import files and run recon-all up to white and pial.
-   # Do not import the T2 or FLAIR yet as it will crash
+   # Run recon-all up to surface registration; import T1 if these were provided,
+   # but not yet T2 or FLAIR for best compatibility across FreeSurfer versions
    ${FREESURFER_HOME}/bin/recon-all \
       -s "${subj}" \
       -sd "${SUBJECTS_DIR}" \
@@ -310,8 +319,16 @@ if ${DOBASE} || [[ ! -z "${IN_T1W}" ]] ; then
    result=($(check_fs))
    if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
       echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
-      echo "       Cannot confirm surface reconstruction was successful. Check the log files."
+      echo "       Cannot confirm surface reconstruction and registration were successful."
+      echo "       Check the log files."
       exit 1
+   fi
+
+   # Keep track of T2 and FLAIR to import later when doing the retessellation
+   # (if we were to import them now, recon-all in FS 8.0.0 would crash)
+   if [[ ! -z "${IN_T2W}" ]] || [[ ! -z "${IN_FLA}" ]] ; then
+      mkdir -p ${SUBJECTS_DIR}/${subj}/after/tmp
+      echo -n "${IN_T2W} ${IN_FLA}" > ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp
    fi
 fi
 
@@ -332,41 +349,44 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 
    # Do the retessellation proper
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
-   ${AFTERDIR}/retessellate --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+   echo ${AFTERDIR}/retessellate --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
    # Replace the existing ?h.orig for the retessellated
-   if [[ -f   ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ]] && \
-      [[ -f   ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ]] ; then
-      cp -rpv ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-      cp -rpv ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+   if [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ]] && \
+      [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ]] ; then
+      cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
    else
       echo "Retessellation failed. The expected output files were not both produced:"
-      echo "- ${SUBJECTS_DIR}/${subj}/after/lh.orig.retess"
-      echo "- ${SUBJECTS_DIR}/${subj}/after/rh.orig.retess"
+      echo "- ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess"
+      echo "- ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess"
       exit 1
    fi
 
-   # If the user didn't explicitly ask, check if the original recon-all used --T2pial or --FLAIRpial; if yes, we will use them
+   # Import T2 or FLAIR if these files were listed in an earlier call to recon-after that used --indir
    OPTS=""
+   [[ -f ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp ]] && OPTS=$(cat ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp)
+   
+   # Check if the original recon-all used --T2pial or --FLAIRpial, or if T2 or FLAIR files have been previously processed
    T2pial=false
    FLAIRpial=false
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-   [[ ! -z "${T2W_LIST}" ]]                               && T2pial=true
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"   |wc -l) -gt 0 ]] && T2pial=true
+   [[ ! -z "${IN_T2W}" ]]                                 && T2pial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
    [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-   [[ ! -z "${FLA_LIST}" ]]                               && FLAIRpial=true
+   [[ ! -z "${IN_FLA}" ]]                                 && FLAIRpial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true
-   ${T2pial}    && OPTS="${OPTS} ${IN_T2W} -T2pial"
-   ${FLAIRpial} && OPTS="${OPTS} ${IN_FLA} -FLAIRpial"
+   ${T2pial}    && OPTS="${OPTS} -T2pial"
+   ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
 
-   # Redo recon-all, from the point in which ?h.orig is used
-   ${FREESURFER_HOME}/bin/recon-all \
+   # Do recon-all, from the point in which ?h.orig is used
+   echo ${FREESURFER_HOME}/bin/recon-all \
       -s "${subj}" \
       -sd "${SUBJECTS_DIR}" \
       -white-preaparc \
@@ -403,6 +423,13 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       exit 1
    fi
 
+   # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
+   for h in lh rh ; do
+      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
+                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
+                           --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
+   done
+
    # Create the retessellated midthickness surface (not a typical FS output but sometimes created by other programs)
    for h in lh rh ; do
       if [[ -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
@@ -410,13 +437,6 @@ if ${DORETESSELLATE} || ${DOALL} ; then
                     -thickness ${SUBJECTS_DIR}/${subj}/surf/${h}.white  \
                      0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
       fi
-   done
-   
-   # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
-   for h in lh rh ; do
-      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
-                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
-                           --out ${SUBJECTS_DIR}/${subj}/after/${h}.orig2whitepreaparc
    done
 fi
 
@@ -464,9 +484,9 @@ fi
 # =====================================================================
 # Do the segmentation of subregions
 if ${DOSUBREG} || ${DOALL} ; then
-   ${FREESURFER_HOME}/bin/segment_subregions thalamus       --cross "${subj}" -sd "${SUBJECTS_DIR}"
-   ${FREESURFER_HOME}/bin/segment_subregions hippo-amygdala --cross "${subj}" -sd "${SUBJECTS_DIR}"
-   ${FREESURFER_HOME}/bin/segment_subregions brainstem      --cross "${subj}" -sd "${SUBJECTS_DIR}"
+   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" -sd "${SUBJECTS_DIR}" thalamus
+   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" -sd "${SUBJECTS_DIR}" hippo-amygdala
+   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" -sd "${SUBJECTS_DIR}" brainstem
 fi
 
 # =====================================================================

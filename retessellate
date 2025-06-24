@@ -102,11 +102,12 @@ if __name__ == '__main__':
                 path3 = srcsrf
                 path4 = trgsrf
             else:
-                os.makedirs(os.path.join(subjdir, subj, 'after'), exist_ok=True)
+                os.makedirs(os.path.join(subjdir, subj, 'after', 'retess'), exist_ok=True)
                 path1 = os.path.join(subjdir, subj, 'surf',  '{}.sphere.reg'.format(h))
                 path2 = os.path.join(fsavgdir,      'surf',  '{}.sphere.reg'.format(h))
                 path3 = os.path.join(subjdir, subj, 'surf',  '{}.{}'.format(h, srf))
-                path4 = os.path.join(subjdir, subj, 'after', '{}.{}.retess'.format(h, srf))
+                path4 = os.path.join(subjdir, subj, 'after', 'retess', '{}.{}.retess'.format(h, srf))
+            print('Retessellating surface: {}'.format(path3))
             
             # Check if the first three paths exist.
             if not os.path.exists(path1):
@@ -132,5 +133,5 @@ if __name__ == '__main__':
             vtx4 = lib.surf.retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=progress)
 
             # Save output surface
-            print('Saving results to: {}'.format(path4))
+            print('Saving to: {}'.format(path4))
             lib.io.write_surf(path4, vtx4, fac2, info3, stamp=True)

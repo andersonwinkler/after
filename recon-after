@@ -349,7 +349,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 
    # Do the retessellation proper
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
-   echo ${AFTERDIR}/retessellate --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+   ${AFTERDIR}/retessellate --subj ${subj} --srf orig --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 
    # Replace the existing ?h.orig for the retessellated
    if [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ]] && \
@@ -363,14 +363,18 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       exit 1
    fi
 
-   # Import T2 or FLAIR if these files were listed in an earlier call to recon-after that used --indir
+   # Import T2 or FLAIR if these files were listed in an earlier call to recon-after
+   # that used --indir, and check if the original recon-all used --T2pial or --FLAIRpial,
+   # or if T2 or FLAIR files have been previously processed
    OPTS=""
-   [[ -f ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp ]] && OPTS=$(cat ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp)
-   
-   # Check if the original recon-all used --T2pial or --FLAIRpial, or if T2 or FLAIR files have been previously processed
    T2pial=false
    FLAIRpial=false
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"   |wc -l) -gt 0 ]] && T2pial=true
+   if [[ -f ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp ]] ; then
+      OPTS=$(cat ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp)
+      grep -qF -- "-T2"    <<< "${OPTS}" && T2pial=true
+      grep -qF -- "-FLAIR" <<< "${OPTS}" && FLAIRpial=true
+   fi
+   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
    [[ ! -z "${IN_T2W}" ]]                                 && T2pial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
    [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true

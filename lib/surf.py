@@ -9,8 +9,9 @@ Created on Sat Jun  7 18:23:07 2025
 import numpy as np
 import time
 
-from . import utils
 from . import platonic
+from . import surf
+from . import utils
 
 # =============================================================================
 def line_intersection(A,B,C,D):
@@ -576,7 +577,25 @@ def avg_edge_len_per_face(tri):
     return avglen
 
 # =============================================================================
-def fractal_dimension(vtx, fac, fsmode=True):
+def calc_fd(vtx, fac, fsmode=True):
+    '''
+    Compute the fractal dimension using our inhouse method.
+
+    Parameters
+    ----------
+    vtx : NumPy array num vertices by 3
+        Vertex coordinates.
+    fac : NumPy array num faces by 3
+        DESCRIPTION.
+    fsmode : bool, optional
+        Boolean indicating if this surface if from FreeSurfer or not.
+        Makes the computations much faster. The default is True.
+
+    Returns
+    -------
+    D : Numpy vector, with num faces elements
+        Fractal dimension, per face.
+    '''
     
     # Area per face and avg edge length in the original resolution
     tri1   = vtx[fac]
@@ -735,7 +754,166 @@ def retessellate(vtx1, fac1, vtx2, fac2, vtx3, fac3, progress=False):
                 vtx4[Cidxi[v], :] = np.dot([aA, aB, aC], vtx3[vidx, :]) / aT
     return vtx4
 
+# =============================================================================
+def surf_dist(vtx1, vtx2, ord=2):
+    '''
+    Compute the distance between surfaces 1 and 2, specified by their
+    matching vertex coordinates.
+    (In fact, we compute the norm; ord can be any of those accepted by
+     np.linalg.norm)
 
-def calc_volume(vtxw, vtxp, fac, method='analytic'):
-    ...
-    return
+    Parameters
+    ----------
+    vtx1 : NumPy array, num vertices by 3
+        Vertex coordinates of first surface.
+    vtx2 : NumPy array, num vertices by 3
+        Vertex coordinates of second surface.
+        Must be the same number of vertices as the first.
+    ord : {int, float, inf, -inf, ‘fro’, ‘nuc’}
+        Order of the norm (see np.linalg.norm).
+        Default is 2 (Euclidean distance)
+
+    Returns
+    -------
+    dist : NumPy vector, num vertices
+        Vertexwise norm (Euclidean distance by default).
+    vec : NumPy array, num vertices by 3
+        Vector over which the norm is calculated (vtx1 - vtx2).
+    '''
+    vec  = vtx1 - vtx2
+    dist = np.linalg.norm(vec, ord=ord)
+    return dist, vec
+
+# =============================================================================
+def calc_rpw(vtxp, vtxw, fac, relative=False):
+    '''
+    Compute the ratio pial/white areas, as defined by Mann et al (2021).
+    However here we use Voronoi areas per vertex, as opposed to the typical
+    method that assigns to each vertex 1/3 of the area of each triangle that
+    meet at that vertex. The latter is also provided as a second output.
+    
+    Reference:
+    * Mann C, Schäfer T, Bletsch A, Gudbrandsen M, Daly E, Suckling J,
+      Bullmore ET, Lombardo MV, Lai M, Craig MC, MRC AIMS Consortium,
+      Baron‐Cohen S, Murphy DGM, Ecker C. Examining volumetric gradients
+      based on the frustum surface ratio in the brain in autism spectrum
+      disorder. Hum Brain Mapp. 2021 Mar;42(4):953–966.
+
+    Parameters
+    ----------
+    vtxp : NumPy array, num vertices by 3
+        Vertex coordinates of pial surface.
+    vtxw : NumPy array, num vertices by 3
+        Vertex coordinates of white surface.
+    fac : NumPy array, num faces by 3
+        Vertex indices that define the faces, same for pial and white.
+    relative: bool, optional
+        Returns not the ratio r=p/w, but instead the ratio (p-w)/(p+w).
+
+    Returns
+    -------
+    vorrpw : NumPy vector, num vertices
+        Ratio surface area of pial by surface area of white, using
+        the Voronoi areas.
+    rpw : NumPy vector, num vertices
+        Ratio surface area of pial by surface area of white, using
+        the typical method (1/3 of face area given to each vertex).
+    '''
+    # Compute Voronoi areas and ratio, vertexwise
+    vorvp, _, areafp  = surf.calc_voronoi_areas(vtxp, fac)
+    vorvw, _, areafw  = surf.calc_voronoi_areas(vtxw, fac)
+    
+    # Convert area per face to typical area per vertex
+    areavp = platonic.dpf2dpv(areafp, fac, facu=None, pycno=True)
+    areavw = platonic.dpf2dpv(areafw, fac, facu=None, pycno=True)
+    
+    # Compute the ratios
+    if relative: # Difference in relation to the mean
+        vorrpw = (vorvp-vorvw)/(vorvp+vorvw)
+        rpw    = (areavp-areavw)/(areavp+areavw)
+    else: # Simple ratio, as in the original paper
+        vorrpw = vorvp/vorvw
+        rpw    = areavp/areavw
+    return vorrpw, rpw
+
+# =============================================================================
+def calc_volume(vtxp, vtxw, fac, method='analytical'):
+    '''
+    Compute the volume of the cortical mantle, vertexwise.
+
+    Parameters
+    ----------
+    vtxp : NumPy array, num vertices by 3
+        Vertex coordinates of pial surface.
+    vtxw : NumPy array, num vertices by 3
+        Vertex coordinates of white surface.
+    fac : NumPy array, num faces by 3
+        Vertex indices that define the faces, same for pial and white.
+    method : string, optional
+        Name of the method. Can be 'analytical', 'product', or 
+        some experimental options (check source code).
+        The default is 'analytical'.
+
+    Returns
+    -------
+    volv : NumPy vector, num vertices
+        Volume, vertexwise.
+    '''
+    # Face coords for both surfaces
+    trip = vtxp[fac]
+    triw = vtxw[fac]    
+
+    if method == 'analytical':
+
+        # Vertex coordinates (ABC, for pial and white).
+        # Use Ap as the origin (0,0,0)
+        Ap = trip[:,0,:]
+        Bp = trip[:,1,:] - Ap
+        Cp = trip[:,2,:] - Ap
+        Aw = triw[:,0,:] - Ap
+        Bw = triw[:,1,:] - Ap
+        Cw = triw[:,2,:] - Ap
+        
+        # Each obliquely truncated trilateral pyramid can be split into
+        # three tetrahedra:
+        # - T1: (Aw,Bw,Cw,Ap)
+        # - T2: (Ap,Bp,Cp,Bw)
+        # - T3: (Ap,Cp,Cw,Bw)
+        # Since Ap is the common vertex for all three, it can be used as the origin.
+        # The next lines compute the volume for each, using a scalar triple product:
+        T1 = np.abs((Aw * np.cross(Bw, Cw, axis=1)).sum(axis=1))
+        T2 = np.abs((Bp * np.cross(Cp, Bw, axis=1)).sum(axis=1))
+        T3 = np.abs((Cp * np.cross(Cw, Bw, axis=1)).sum(axis=1))
+    
+        # Add them up (volume per face)
+        volf = (T1 + T2 + T3) / 6
+        
+        # Convert to vertexwise
+        volv = platonic.dpf2dpv(volf, fac, facu=None, pycno=True)
+        
+    elif method == 'product':
+        
+        # Facewise white area, converted to vertexwise
+        areafw = signed_area(triw, rfn=None)[0]
+        areavw = platonic.dpf2dpv(areafw, fac, facu=None, pycno=True)
+        
+        # Cortical thickness, calculated (as opposed to loaded from FS)
+        ct   = surf_dist(vtxp, vtxw)
+        
+        # Volume, vertexwise
+        volv = ct*(areavw)
+        
+    elif method == 'mann': # should give the same as 'analytical'
+        
+        # Facewise areas, converted to vertexwise
+        areafp = signed_area(trip, rfn=None)[0]
+        areafw = signed_area(triw, rfn=None)[0]
+        areavp = platonic.dpf2dpv(areafp, fac, facu=None, pycno=True)
+        areavw = platonic.dpf2dpv(areafw, fac, facu=None, pycno=True)
+        
+        # Cortical thickness, calculated (as opposed to loaded from FS)
+        ct   = surf_dist(vtxp, vtxw)
+        
+        # Volume, vertexwise
+        volv = ct*(areavp + areavw + np.sqrt(areavp*areavw))
+    return volv

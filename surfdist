@@ -52,8 +52,7 @@ if __name__ == '__main__':
     vtx2 = vtx2 + info2['cras']
 
     # Compute the distances
-    vec = vtx2 - vtx1
-    dist = np.sum(vec**2, axis=1)
+    dist, vec = lib.surf.calc_distance(vtx1, vtx2)
 
     # Save output surface
     lib.io.write_curv(args.out, dist, vec=vec, use_ascii=False)

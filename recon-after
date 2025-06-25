@@ -51,7 +51,7 @@ Options:
   Compute the local gyrification index (following Schaer et al., 2008).
   
 --myelin
-  Compute proxy measures for myelin based on T2 or FLAIR either of these
+  Compute proxy measures for myelin based on T2 or FLAIR if either of these
   modalities were originally imported with the options --T2 or --FLAIR in
   recon-all. It is not necessary that the flags --T2pial or --FLAIR pial were
   originally used.
@@ -390,7 +390,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
 
    # Do recon-all, from the point in which ?h.orig is used
-   echo ${FREESURFER_HOME}/bin/recon-all \
+   ${FREESURFER_HOME}/bin/recon-all \
       -s "${subj}" \
       -sd "${SUBJECTS_DIR}" \
       -white-preaparc \
@@ -457,7 +457,7 @@ if ${DOCURVATURES} || ${DOALL} ; then
    checkfiles ${FILELIST} "computation of curvatures"
    
    # Compute the curvatures
-   ${AFTERDIR}/curvatures --subj ${subj} --surf white,pial --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+   ${AFTERDIR}/curvatures --subj ${subj} --surf pial,white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
 fi
 
 # =====================================================================
@@ -488,9 +488,9 @@ fi
 # =====================================================================
 # Do the segmentation of subregions
 if ${DOSUBREG} || ${DOALL} ; then
-   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" -sd "${SUBJECTS_DIR}" thalamus
-   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" -sd "${SUBJECTS_DIR}" hippo-amygdala
-   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" -sd "${SUBJECTS_DIR}" brainstem
+   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" --sd "${SUBJECTS_DIR}" thalamus
+   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" --sd "${SUBJECTS_DIR}" hippo-amygdala
+   ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" --sd "${SUBJECTS_DIR}" brainstem
 fi
 
 # =====================================================================

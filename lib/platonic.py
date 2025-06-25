@@ -472,7 +472,8 @@ def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
         Whether to use a mass-conservative (pycnophylactic) method.
         The default is False.
     fsmode : Bool, optional
-        Assume face indices follow FreeSurfer structure. The default is True.
+        Assume face indices follow FreeSurfer structure. Only has an effect
+        if facu is provided. The default is True.
 
     Returns
     -------
@@ -486,19 +487,20 @@ def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
     # If no upsampling is required
     if facu is None:
         facflat = fac.flatten()
-        dpv     = np.zeros(nV)
-        cnt     = np.zeros(nV)
+        dpv = np.zeros(nV)
         np.add.at(dpv, facflat, np.tile(dpf[:,None],(1,3)).flatten())
-        np.add.at(cnt, facflat, 1)
         if pycno:
             # Redistribute by a factor of 1/3
             dpv /= 3
             # Scale factor to account for some vertices receiving data from
-            # different number of faces (5 or 6)
-            s   = np.sum(cnt)/nV/cnt
-            dpv = dpv*s
+            # different number of faces (5 or 6) (not needed unless we assume
+            # all faces have identical size, impossible in practice)
+            # s   = np.sum(cnt)/nV/cnt
+            # dpv = dpv*s
         else:
             # Average by the number of faces that meet at that vertex
+            cnt = np.zeros(nV)
+            np.add.at(cnt, facflat, 1)
             dpv /= cnt
     else:
         # Find additional vertex indices (of the edge midpoints) that the data

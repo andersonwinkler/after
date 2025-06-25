@@ -132,7 +132,7 @@ if __name__ == "__main__":
                 # Compute the fractal dimension. Results will be for
                 # one level of resolution down, facewise
                 print('Computing facewise fractal dimension using an inhouse algorithm')
-                FD = lib.surf.fractal_dimension(vtx, fac, fsmode=True)
+                FD = lib.surf.calc_fd(vtx, fac, fsmode=True)
                 
                 # Upsample just slightly to vertexwise in the resolution of the original mesh
                 print('Converting facewise fractal dimension to vertexwise')

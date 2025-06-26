@@ -351,6 +351,7 @@ if ${DOBASE} || ${DOALL} ; then
 
    # Keep track of T2 and FLAIR to import later when doing the retessellation
    # (if we were to import them now, recon-all in FS 8.0.0 would crash)
+   mkdir -p ${SUBJECTS_DIR}/${subj}/after
    echo "${IN_T1W}"  > ${INPUTS}
    echo "${IN_T2W}" >> ${INPUTS}
    echo "${IN_FLA}" >> ${INPUTS}
@@ -378,8 +379,8 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    # Replace the existing ?h.orig for the retessellated
    if [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ]] && \
       [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ]] ; then
-      echo cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-      echo cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+      cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
    else
       echo "Retessellation failed. The expected output files were not both produced:"
       echo "- ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess"
@@ -573,7 +574,7 @@ fi
 # Compute the myelin proxy. There's no need to check if files exist as
 # that will be done by melina.
 if ${DOMYELIN} || ${DOALL} ; then
-   ${AFTERDIR}/melina -s ${subj} -c
+   ${AFTERDIR}/melina -s "${subj}" -c
 fi
 
 # =====================================================================
@@ -588,8 +589,7 @@ fi
 # Make nice figures and histograms for visual inspection
 if ${DOVIEWS} || ${DOALL} ; then
    OPTS=""
-   (${DORETESSELLATE} || ${DOALL}) && OPTS="${OPTS} --retessellation"
-   (${DOCURVATURES}   || ${DOALL}) && OPTS="${OPTS} --curvatures"
+   (${DOCURVATURES}   || ${DOALL}) && OPTS="${OPTS} --curvatures --mantle"
    (${DOLGI}          || ${DOALL}) && OPTS="${OPTS} --lgi"
    (${DOMYELIN}       || ${DOALL}) && OPTS="${OPTS} --myelin"
    ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}

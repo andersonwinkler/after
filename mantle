@@ -71,6 +71,10 @@ if __name__ == "__main__":
             print('Computing the Frustum Surface Ratio')
             mantle['fsr'] = lib.surf.calc_fsr(vtxp, vtxw, facp, thickness)
             
+            # Compute the distance between white and pial (a kind of thickness)
+            print('Computing distance between white and pial')
+            mantle['dpw'] = lib.surf.surf_dist(vtxp, vtxw)
+            
             # Save results
             outdir = os.path.join(subjdir, subj, 'after', 'mantle')
             print('Saving results to directory: {}'.format(outdir))

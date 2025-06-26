@@ -158,6 +158,32 @@ def icosahedron(meas='e', value=1, fsmode=True):
     return vtx, fac
 
 # =============================================================================
+def icotest(X):
+    # Constants for the icosahedron
+    V0 = 12
+    F0 = 20
+    E0 = 30
+
+    # Discover what kind of data this is
+    nX = len(X)
+    orderv = math.log2((nX-2)/(V0-2))/2
+    orderf = math.log2(nX/F0)/2
+    ordere = math.log2(nX/E0)/2
+    if orderv == np.round(orderv):
+        dtype = 'vtx'
+        order = orderv
+    elif orderf == np.round(orderf):
+        dtype = 'fac'
+        order = orderf
+    elif ordere == np.round(ordere):
+        dtype = 'edg'
+        order = ordere
+    else:
+        dtype = None
+        order = -1
+    return dtype, order
+
+# =============================================================================
 def icoup(vtx, fac, n, fsmode=True):
     '''
     Recursively upsample an icosahedron n times (will work also with tetra and octahedron).

@@ -12,30 +12,58 @@ import nibabel as nib
 import json
 
 # =============================================================================
-def read_surf(filein):
+def read_surf(filein, is_ascii=False):
     '''
     Read a FreeSurfer geometry file.
+    To put them in the same space as shown in FreeView, after loading,
+    redefine vtx as vtx = vtx + info['cras']. FreeView does not seem to make
+    use of info['xras'], info['yras'], and info['zras'],
     '''
-    vtx, fac, info, stamp = nib.freesurfer.read_geometry(filein, read_metadata=True, read_stamp=True)
+    if is_ascii:
+        with open(filein, 'r') as f:
+            # Parse header and dimensions
+            header = f.readline()
+            if not header.startswith('#!ascii'):
+                raise ValueError("Not a valid FreeSurfer ASCII file")            
+            nV, nF = map(int, f.readline().split())
+        
+        # Read all data at once using numpy
+        data = np.loadtxt(filein, skiprows=2)
+        
+        # Split into vertices and faces
+        vtx   = data[:nV,:3]
+        fac   = data[nF:,:3].astype(int)
+        info  = None
+        stamp = None
+    else:
+        vtx, fac, info, stamp = nib.freesurfer.read_geometry(filein, read_metadata=True, read_stamp=True)
     return vtx, fac, info, stamp
 
 # -----------------------------------------------------------------------------
 def write_surf(fileout, vtx, fac, info, stamp=True):
     '''
     Write a FreeSurfer geometry file.
+    If you manually redefined the vtx as vtx = vtx + info['cras'], and
+    you are supplying info, then need to subtract info['cras'] back.
     '''
     nib.freesurfer.write_geometry(fileout, vtx, fac, volume_info=info, create_stamp=True)
     
 # =============================================================================
-def read_mgh():
-    ... # XXX to do
-    return
+def read_mgh(filein):
+    mgh    = nib.load(filein)
+    data   = mgh.get_fdata()
+    affine = mgh.affine
+    header = mgh.header
+    return data, affine, header
 
 # -----------------------------------------------------------------------------
-def write_mgh(fileout, data, affine=None):
+def write_mgh(fileout, data, affine=None, header=None):
     if affine is None:
         affine = np.eye(4)
-    mgh = nib.MGHImage(data, affine)
+    if header is None:    
+        mgh = nib.MGHImage(data, affine)
+    else:
+        mgh = nib.MGHImage(data, affine, header)
     nib.save(mgh, fileout)
 
 # =============================================================================
@@ -44,15 +72,18 @@ def read_annot(filein, orig_ids=False):
     return labels, ctab, names
 
 # =============================================================================
-def read_curv(filein, use_ascii=False):
-    if use_ascii:
-        ... # XXX to do
+def read_curv(filein, is_ascii=False):
+    if is_ascii:
+        data = np.loadtxt(filein, usecols=(1, 2, 3, 4)) # ignore col 0
+        curv = data[:, 3]
+        vec  = data[:,:3]
     else:
         curv = nib.freesurfer.io.read_morph_data(filein)
-    return curv
+        vec  = None
+    return curv, vec
 
 # -----------------------------------------------------------------------------
-def write_curv(fileout, curv, vec=None, use_ascii=False): # ===================
+def write_curv(fileout, curv, vec=None, use_ascii=False):
     '''
     Write a FreeSurfer curvature file.
     If "vec" is provided and not saving in ASCII, then an ASCII file (.dpv)

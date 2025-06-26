@@ -116,7 +116,7 @@ if __name__ == "__main__":
                 
                 # Compute Voronoi areas
                 print('Computing Voronoi areas per vertex at each face using an inhouse algorithm')
-                vorv, vorf, areas = lib.surf.calc_voronoi_areas(vtx, fac)
+                vorv, vorf, areas = lib.surf.voronoi_area(vtx, fac)
             
                 # Compute principal curvatures
                 print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')

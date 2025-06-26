@@ -10,7 +10,6 @@ import numpy as np
 import time
 
 from . import platonic
-from . import surf
 from . import utils
 
 # =============================================================================
@@ -178,7 +177,7 @@ def signed_area(tri, rfn=None):
     return area, fn
 
 # =============================================================================
-def calc_voronoi_areas(vtx, fac):
+def voronoi_area(vtx, fac):
     '''
     Compute the Voronoi areas for each vertex and, within a face, for each
     vertex of that face.
@@ -781,63 +780,12 @@ def surf_dist(vtx1, vtx2, ord=2):
         Vector over which the norm is calculated (vtx1 - vtx2).
     '''
     vec  = vtx1 - vtx2
-    dist = np.linalg.norm(vec, ord=ord)
+    dist = np.linalg.norm(vec, axis=1, ord=ord)
     return dist, vec
 
 # =============================================================================
-def calc_rpw(vtxp, vtxw, fac, relative=False):
-    '''
-    Compute the ratio pial/white areas, as defined by Mann et al (2021).
-    However here we use Voronoi areas per vertex, as opposed to the typical
-    method that assigns to each vertex 1/3 of the area of each triangle that
-    meet at that vertex. The latter is also provided as a second output.
-    
-    Reference:
-    * Mann C, Schäfer T, Bletsch A, Gudbrandsen M, Daly E, Suckling J,
-      Bullmore ET, Lombardo MV, Lai M, Craig MC, MRC AIMS Consortium,
-      Baron‐Cohen S, Murphy DGM, Ecker C. Examining volumetric gradients
-      based on the frustum surface ratio in the brain in autism spectrum
-      disorder. Hum Brain Mapp. 2021 Mar;42(4):953–966.
-
-    Parameters
-    ----------
-    vtxp : NumPy array, num vertices by 3
-        Vertex coordinates of pial surface.
-    vtxw : NumPy array, num vertices by 3
-        Vertex coordinates of white surface.
-    fac : NumPy array, num faces by 3
-        Vertex indices that define the faces, same for pial and white.
-    relative: bool, optional
-        Returns not the ratio r=p/w, but instead the ratio (p-w)/(p+w).
-
-    Returns
-    -------
-    vorrpw : NumPy vector, num vertices
-        Ratio surface area of pial by surface area of white, using
-        the Voronoi areas.
-    rpw : NumPy vector, num vertices
-        Ratio surface area of pial by surface area of white, using
-        the typical method (1/3 of face area given to each vertex).
-    '''
-    # Compute Voronoi areas and ratio, vertexwise
-    vorvp, _, areafp  = surf.calc_voronoi_areas(vtxp, fac)
-    vorvw, _, areafw  = surf.calc_voronoi_areas(vtxw, fac)
-    
-    # Convert area per face to typical area per vertex
-    areavp = platonic.dpf2dpv(areafp, fac, facu=None, pycno=True)
-    areavw = platonic.dpf2dpv(areafw, fac, facu=None, pycno=True)
-    
-    # Compute the ratios
-    if relative: # Difference in relation to the mean
-        vorrpw = (vorvp-vorvw)/(vorvp+vorvw)
-        rpw    = (areavp-areavw)/(areavp+areavw)
-    else: # Simple ratio, as in the original paper
-        vorrpw = vorvp/vorvw
-        rpw    = areavp/areavw
-    return vorrpw, rpw
-
-# =============================================================================
-def calc_volume(vtxp, vtxw, fac, method='analytical'):
+def calc_volume(vtxp, vtxw, fac, method='analytical',
+                area='white', thickness=None):
     '''
     Compute the volume of the cortical mantle, vertexwise.
 
@@ -853,6 +801,12 @@ def calc_volume(vtxp, vtxw, fac, method='analytical'):
         Name of the method. Can be 'analytical', 'product', or 
         some experimental options (check source code).
         The default is 'analytical'.
+    area : For the product method only, which area to use.
+        Can be 'white' or 'pial'. Default is 'white'.
+    thickness : NumPy vector, num vertices
+        For the product method only, a vector of vertexwise cortical
+        thickness can be provided. If None, will use the distance between
+        the pial and white. Default is None.
 
     Returns
     -------
@@ -897,13 +851,20 @@ def calc_volume(vtxp, vtxw, fac, method='analytical'):
         areafw = signed_area(triw, rfn=None)[0]
         areavw = platonic.dpf2dpv(areafw, fac, facu=None, pycno=True)
         
-        # Cortical thickness, calculated (as opposed to loaded from FS)
-        ct   = surf_dist(vtxp, vtxw)
+        # Cortical thickness
+        if thickness is None:
+            thickness = surf_dist(vtxp, vtxw)
         
         # Volume, vertexwise
-        volv = ct*(areavw)
+        volv = thickness*areavw
         
-    elif method == 'mann': # should give the same as 'analytical'
+    elif method == 'mann': # should have a high correlation with 'analytical'
+        # Reference:
+        # * Mann C, Schäfer T, Bletsch A, Gudbrandsen M, Daly E, Suckling J,
+        #   Bullmore ET, Lombardo MV, Lai M, Craig MC, MRC AIMS Consortium,
+        #   Baron‐Cohen S, Murphy DGM, Ecker C. Examining volumetric gradients
+        #   based on the frustum surface ratio in the brain in autism spectrum
+        #   disorder. Hum Brain Mapp. 2021 Mar;42(4):953–966.
         
         # Facewise areas, converted to vertexwise
         areafp = signed_area(trip, rfn=None)[0]
@@ -911,9 +872,99 @@ def calc_volume(vtxp, vtxw, fac, method='analytical'):
         areavp = platonic.dpf2dpv(areafp, fac, facu=None, pycno=True)
         areavw = platonic.dpf2dpv(areafw, fac, facu=None, pycno=True)
         
-        # Cortical thickness, calculated (as opposed to loaded from FS)
-        ct   = surf_dist(vtxp, vtxw)
+        # Cortical thickness
+        if thickness is None:
+            thickness = surf_dist(vtxp, vtxw)
         
         # Volume, vertexwise
-        volv = ct*(areavp + areavw + np.sqrt(areavp*areavw))
+        volv = thickness*(areavp + areavw + np.sqrt(areavp*areavw))
     return volv
+
+# =============================================================================
+def calc_rpw(vtxp, vtxw, fac, relative=False, voronoi=True):
+    '''
+    Compute the ratio pial/white areas, as defined by Mann et al (2021).
+    However here we allow Voronoi areas per vertex, as opposed to the typical
+    method that assigns to each vertex 1/3 of the area of each triangle that
+    meet at that vertex. The latter is also provided as a second output.
+    
+    Reference:
+    * Mann C, Schäfer T, Bletsch A, Gudbrandsen M, Daly E, Suckling J,
+      Bullmore ET, Lombardo MV, Lai M, Craig MC, MRC AIMS Consortium,
+      Baron‐Cohen S, Murphy DGM, Ecker C. Examining volumetric gradients
+      based on the frustum surface ratio in the brain in autism spectrum
+      disorder. Hum Brain Mapp. 2021 Mar;42(4):953–966.
+
+    Parameters
+    ----------
+    vtxp : NumPy array, num vertices by 3
+        Vertex coordinates of pial surface.
+    vtxw : NumPy array, num vertices by 3
+        Vertex coordinates of white surface.
+    fac : NumPy array, num faces by 3
+        Vertex indices that define the faces, same for pial and white.
+    relative: bool, optional
+        Returns not the ratio r=p/w, but instead the ratio (p-w)/(p+w).
+
+    Returns
+    -------
+    vorrpw : NumPy vector, num vertices
+        Ratio surface area of pial by surface area of white, using
+        the Voronoi areas.
+    rpw : NumPy vector, num vertices
+        Ratio surface area of pial by surface area of white, using
+        the typical method (1/3 of face area given to each vertex).
+    '''
+    if voronoi:
+        # Compute vertexwise Voronoi areas
+        areavp = voronoi_area(vtxp, fac)[0]
+        areavw = voronoi_area(vtxw, fac)[0]
+    else:
+        # Compute facewise areas
+        areafp = signed_area(vtxp[fac])[0]
+        areafw = signed_area(vtxw[fac])[0]
+        # Convert to vertexwise
+        areavp = platonic.dpf2dpv(areafp, fac, pycno=True)
+        areavw = platonic.dpf2dpv(areafw, fac, pycno=True)
+    
+    # Compute the ratios
+    if relative: # Difference in relation to the mean
+        rpw    = (areavp-areavw) / (areavp+areavw) * 2
+    else: # Simple ratio, as in the original paper
+        rpw    = areavp/areavw
+    return rpw
+
+# =============================================================================
+def calc_fsr(vtxp, vtxw, fac, thickness):
+    '''
+    Compute the Frustum Surface Ratio (FSR).
+
+    Reference:
+    * Mann C, Schäfer T, Bletsch A, Gudbrandsen M, Daly E, Suckling J,
+      Bullmore ET, Lombardo MV, Lai M, Craig MC, MRC AIMS Consortium,
+      Baron‐Cohen S, Murphy DGM, Ecker C. Examining volumetric gradients
+      based on the frustum surface ratio in the brain in autism spectrum
+      disorder. Hum Brain Mapp. 2021 Mar;42(4):953–966.
+
+    Parameters
+    ----------
+    vtxp : NumPy array, num vertices by 3
+        Vertex coordinates of pial surface.
+    vtxw : NumPy array, num vertices by 3
+        Vertex coordinates of white surface.
+    fac : NumPy array, num faces by 3
+        Vertex indices that define the faces, same for pial and white.
+    thickness : NumPy vector, num vertices
+        Vertexwise cortical thickness. If provided as None,
+        will use the distance between the pial and white.
+
+    Returns
+    -------
+    fsr : NumPy vector, num vertices
+        The Frustum Surface Ratio.
+    '''
+    Ve  = calc_volume(vtxp, vtxw, fac, method='product',
+                      area='pial', thickness=thickness)
+    Va  = calc_volume(vtxp, vtxw, fac, method='analytical')
+    fsr = Ve/Va
+    return fsr

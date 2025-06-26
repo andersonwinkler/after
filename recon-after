@@ -43,6 +43,21 @@ Options:
   recon-all past the point in which the surface registration is performed
   (that is, ?h.sphere.reg must exist).
 
+--refine [no|auto|T2|FLAIR]
+  Refine the pial surface based on T2 or FLAIR. This option only has an
+  effect if --retessellate is used. Choose from:
+  "no"     Will not refine after retessellation; existing ?h.pial.T2 or
+           ?h.pial.FLAIR from before retessellation will be deleted after
+           the retessellation has completes.
+  "auto":  Will detect if T2 or FLAIR were used in the original FS run
+           (if the original run exists) or will use whichever is found in
+           the input directory (--indir). If both FLAIR and T2 are found,
+           ${0##*/} will not run and you will need to be specific whether
+           you want to refine with T2 or FLAIR.
+  "T2":    Specifies that you want to use T2 to refine the pial.
+  "FLAIR": Specifies that you want to use FLAIR to refine the pial.
+  Default is "auto".
+
 --curvatures
   Compute various curvature metrics and their composites. The ?h.white
   and ?h.pial surfaces must exist.
@@ -115,7 +130,7 @@ check_fs() {
 }
 
 # =====================================================================
-checkfiles() {
+check_files() {
    # Confirm that FS has run successfully up to the stage we need;
    # If not, inform the user about the missing files. Note we don't care
    # here if recon-all.log shows last a failed run. As long as these
@@ -145,6 +160,7 @@ NEW_SUBJECTS_DIR=""     # New subjects dir to store outputs. Will be replaced be
 DOALL=false             # Do everything
 DOBASE=false            # Do a basic reconstruction up to surface registration
 DORETESSELLATE=false    # Do the retessellation
+DOREFINE="auto"         # How to deal with refining
 DOCURVATURES=false      # Compute the better curvatures and their composites
 DOLGI=false             # Compute the LGI
 DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
@@ -157,7 +173,7 @@ PROGRESS=""             # Show a progress bar when retessellating? (avoid using 
 while [[ ${#} -gt 0 ]] ; do
    key="${1}"
    case ${key} in
-      -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
+   -subject|-subjid|-sid|-s|-subj|--subject|--subjid|--sid|--s|--subj)
       subj="${2}"
       shift 2
       ;;
@@ -184,6 +200,10 @@ while [[ ${#} -gt 0 ]] ; do
    -retessellate|--retessellate)
       DORETESSELLATE=true
       shift
+      ;;
+   -refine|--refine)
+      DOREFINE="${2}"
+      shift 2
       ;;
    -curvatures|--curvatures)
       DOCURVATURES=true
@@ -280,24 +300,29 @@ fi
 
 # =====================================================================
 # Locate input data if we provided an input directory
+IN_T1W=""
+IN_T2W=""
+IN_FLA=""
 if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] ; then
-   T1W_LIST=$(find -L ${IN_DIR}/${subj} -name \*_T1w.nii.gz  |sort)
-   T2W_LIST=$(find -L ${IN_DIR}/${subj} -name \*_T2w.nii.gz  |sort)
-   FLA_LIST=$(find -L ${IN_DIR}/${subj} -name \*_FLAIR.nii.gz|sort)
-   IN_T1W=""
+   T1W_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_T1w.nii"   -o -name "*_T1w.nii.gz"   \)|sort -r)
+   T2W_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_T2w.nii"   -o -name "*_T2w.nii.gz"   \)|sort -r)
+   FLA_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_FLAIR.nii" -o -name "*_FLAIR.nii.gz" \)|sort -r)
    for f in ${T1W_LIST} ; do
-      IN_T1W="${IN_T1W} -i $(readlink -f ${f})"
+      IN_T1W="-i $(readlink -f ${f}) ${IN_T1W}"
    done
-   IN_T2W=""
    for f in ${T2W_LIST} ; do
-      IN_T2W="${IN_T2W} -T2 $(readlink -f ${f})"
+      IN_T2W="-T2 $(readlink -f ${f}) ${IN_T2W}"
    done
-   IN_FLA=""
    for f in ${FLA_LIST} ; do
-      IN_FLA="${IN_FLA} -FLAIR $(readlink -f ${f})"
+      IN_FLA="-FLAIR $(readlink -f ${f}) ${IN_FLA}"
    done
 fi
 [[ ! -z "${IN_T1W}" ]] && DOBASE=true
+
+# Where we'll store the list of inputs. This file can't be created
+# before recon-all runs otherwise the subject's directory will already
+# exist, preventing recon-all from running
+INPUTS=${SUBJECTS_DIR}/${subj}/after/inputs.txt
 
 # =====================================================================
 # Run an initial FreeSurfer call
@@ -326,10 +351,9 @@ if ${DOBASE} || ${DOALL} ; then
 
    # Keep track of T2 and FLAIR to import later when doing the retessellation
    # (if we were to import them now, recon-all in FS 8.0.0 would crash)
-   if [[ ! -z "${IN_T2W}" ]] || [[ ! -z "${IN_FLA}" ]] ; then
-      mkdir -p ${SUBJECTS_DIR}/${subj}/after/tmp
-      echo -n "${IN_T2W} ${IN_FLA}" > ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp
-   fi
+   echo "${IN_T1W}"  > ${INPUTS}
+   echo "${IN_T2W}" >> ${INPUTS}
+   echo "${IN_FLA}" >> ${INPUTS}
 fi
 
 # =====================================================================
@@ -345,7 +369,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       ${SUBJECTS_DIR}/${subj}/surf/autodet.gw.stats.rh.dat
       ${SUBJECTS_DIR}/${subj}/surf/lh.sphere.reg
       ${SUBJECTS_DIR}/${subj}/surf/rh.sphere.reg )
-   checkfiles ${FILELIST} retesselation
+   check_files ${FILELIST} retesselation
 
    # Do the retessellation proper
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
@@ -354,8 +378,8 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    # Replace the existing ?h.orig for the retessellated
    if [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ]] && \
       [[ -f   ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ]] ; then
-      cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
-      cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
+      echo cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/lh.orig
+      echo cp -rpv ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess ${SUBJECTS_DIR}/${subj}/surf/rh.orig
    else
       echo "Retessellation failed. The expected output files were not both produced:"
       echo "- ${SUBJECTS_DIR}/${subj}/after/retess/lh.orig.retess"
@@ -363,31 +387,97 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       exit 1
    fi
 
-   # Import T2 or FLAIR if these files were listed in an earlier call to recon-after
-   # that used --indir, and check if the original recon-all used --T2pial or --FLAIRpial,
-   # or if T2 or FLAIR files have been previously processed
-   OPTS=""
-   T2pial=false
-   FLAIRpial=false
-   if [[ -f ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp ]] ; then
-      OPTS=$(cat ${SUBJECTS_DIR}/${subj}/after/tmp/t2flair_to_import.tmp)
-      grep -qF -- "-T2"    <<< "${OPTS}" && T2pial=true
-      grep -qF -- "-FLAIR" <<< "${OPTS}" && FLAIRpial=true
-   fi
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-   [[ ! -z "${IN_T2W}" ]]                                 && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
-   [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-   [[ ! -z "${IN_FLA}" ]]                                 && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
-   [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true
-   ${T2pial}    && OPTS="${OPTS} -T2pial"
-   ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+   # Decide how to deal with T2 and/or FLAIR and refining the pial surface
+   case ${DOREFINE} in
+
+      no) # No refining of the pial after retessellating
+         OPTS=""
+         ;;
+
+      T2) # Refine using the T2
+         OPTS=""
+         T2pial=false
+         if [[ -f ${INPUTS} ]] ; then
+            IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
+            if [[ ! -z ${IN_T2W} ]] ; then
+               OPTS="${IN_T2W}"
+               T2pial=true
+            else
+               echo "Error: No T2 inputs are available for ${subj}."
+               exit 1
+            fi
+         else
+            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
+         fi
+         ${T2pial} && OPTS="${OPTS} -T2pial"
+         ;;
+
+      FLAIR) # Refine using the FLAIR
+         OPTS=""
+         FLAIRpial=false
+         if [[ -f ${INPUTS} ]] ; then
+            IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
+            if [[ ! -z ${IN_FLA} ]] ; then
+               OPTS="${IN_FLA}"
+               FLAIRpial=true
+            else
+               echo "Error: No FLAIR inputs are available for ${subj}."
+               exit 1
+            fi
+         else
+            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true            
+         fi
+         ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+         ;;
+
+      auto) # Discover automatically whether to do T2 or FLAIR
+         OPTS=""
+         T2pial=false
+         FLAIRpial=false
+         if [[ -f ${INPUTS} ]] ; then
+            IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
+            IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
+            if [[ ! -z ${IN_T2W} ]] ; then
+               OPTS="${IN_T2W}"
+               T2pial=true
+            fi
+            if [[ ! -z ${IN_FLA} ]] ; then
+               OPTS="${IN_FLA}"
+               FLAIRpial=true
+            fi
+         else
+            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
+            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
+            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true 
+         fi
+         if ${T2pial} && ${FLAIRpial} ; then
+            echo "Error: Cannot use both T2 and FLAIR for ${subj}."
+            exit 1
+         fi
+         ${T2pial}    && OPTS="${OPTS} -T2pial"
+         ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
+         ;;
+
+      *)
+         echo "Error: Unknown --refine option ${key} for subject ${subj}"
+         exit 1
+         ;;
+   esac
 
    # Do recon-all, from the point in which ?h.orig is used
    ${FREESURFER_HOME}/bin/recon-all \
@@ -422,14 +512,14 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 
    # Check if recon-all finished without error and make sure that that termination was just now
    result=($(check_fs))
-   if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
+   if [[ ${result[0]} != "success" ]] ; then #|| [[ ${result[1]} -gt 5 ]] ; then
       echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
       exit 1
    fi
 
    # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
    for h in lh rh ; do
-      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
+      echo ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
                            --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
                            --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
    done
@@ -437,7 +527,7 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    # Create the retessellated midthickness surface (not a typical FS output but sometimes created by other programs)
    for h in lh rh ; do
       if [[ -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
-         ${FREESURFER_HOME}/bin/mris_expand \
+         echo ${FREESURFER_HOME}/bin/mris_expand \
                     -thickness ${SUBJECTS_DIR}/${subj}/surf/${h}.white  \
                      0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
       fi
@@ -454,10 +544,11 @@ if ${DOCURVATURES} || ${DOALL} ; then
       ${SUBJECTS_DIR}/${subj}/surf/rh.white
       ${SUBJECTS_DIR}/${subj}/surf/lh.pial
       ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
-   checkfiles ${FILELIST} "computation of curvatures"
+   check_files ${FILELIST} "computation of curvatures"
    
    # Compute the curvatures
-   ${AFTERDIR}/curvatures --subj ${subj} --surf pial,white --subjdir "${SUBJECTS_DIR}" ${PROGRESS}
+   ${AFTERDIR}/curvatures --subj ${subj} --subjdir "${SUBJECTS_DIR}" --surf pial,white ${PROGRESS}
+   ${AFTERDIR}/mantle     --subj ${subj} --subjdir "${SUBJECTS_DIR}"
 fi
 
 # =====================================================================
@@ -468,7 +559,7 @@ if ${DOLGI} || ${DOALL} ; then
    FILELIST=(
       ${SUBJECTS_DIR}/${subj}/surf/lh.pial
       ${SUBJECTS_DIR}/${subj}/surf/rh.pial )
-   checkfiles ${FILELIST} "computation of the LGI"
+   check_files ${FILELIST} "computation of the LGI"
 
    # Compute the LGI proper
    PATH=${AFTERDIR}:${PATH} \

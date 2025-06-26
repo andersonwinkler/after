@@ -47,7 +47,7 @@ do
   esac
 done
 if [[ ${PF_LIST} == "" ]] && [[ ${PD_LIST} == "" ]] ; then
-  PF_LIST=0.5
+  PF_LIST="0.1 0.5 0.9"
 fi
 if   [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.prenorm.mgz ]] ; then
    TYPE=T2
@@ -185,11 +185,44 @@ if [[ ${TYPE} == "T2" ]] || [[ ${TYPE} == "FLAIR" ]] ; then
                ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.${pfstr}.mgz \
                ${SUBJECTS_DIR}/${subj}/surf/${h}.white \
                ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.${pfstr}
+         done
+      done
+   fi
+
+   # Compute the ratio between myelin at the 90% of the cortex height over 10% of the height
+   if [[ -f ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.f_0.9.mgz ]] && \
+      [[ -f ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.f_0.1.mgz ]] ; then
+      ${FREESURFER_HOME}/bin/fscalc \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.f_0.9.mgz sub \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.f_0.1.mgz \
+         --o ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.diff.mgz
+      ${FREESURFER_HOME}/bin/fscalc \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.f_0.9.mgz add \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.f_0.1.mgz div 2 \
+         --o ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.mean.mgz
+      ${FREESURFER_HOME}/bin/fscalc \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.diff.mgz div \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.mean.mgz \
+         --o ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.r91.mgz
+      ${FREESURFER_HOME}/bin/mris_convert -c \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.r91.mgz \
+         ${SUBJECTS_DIR}/${subj}/surf/${h}.white \
+         ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.r91
+     rm -rf ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.diff.mgz \
+            ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.mean.mgz \
+            ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.r91.mgz
+   fi
+
+   # Now we delete specifically the files we created earlier
+   if [[ ${PF_LIST} != "" ]] ; then
+      for pf in ${PF_LIST} ; do
+         pfstr="f_${pf}"
+         for h in lh rh ; do
             rm -f ${SUBJECTS_DIR}/${subj}/after/melina/${h}.myelin.${pfstr}.mgz
          done
       done
    fi
-   
+
    # Project to the surface, using a distance from the white.
    if [[ ${PD_LIST} != "" ]] ; then
       for pd in ${PD_LIST} ; do

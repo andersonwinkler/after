@@ -1,0 +1,81 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Mar  7 22:36:30 2025
+
+@author: winkleram
+"""
+
+import os
+import argparse
+
+import lib
+
+if __name__ == "__main__":
+
+    # Argument parser
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Compute various metrics from the cortical mantle. ' + \
+                        'Invoke with --subj (and optionally --subjdir) ',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
+    # Options to call specifying a subject
+    parser.add_argument('--subj',
+                        help='List of subjects separated by commas',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subjdir',
+                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        type=str, required=False, default=None)
+    
+    # Parsing proper
+    args      = parser.parse_args()
+    subj      = args.subj
+    subjdir   = args.subjdir
+         
+    # Find SUBJECTS_DIR
+    if subjdir is None:
+        subjdir = os.getenv('SUBJECTS_DIR')
+    if subjdir == '' or subjdir is None:
+        raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
+    
+    # Make a list of subjects
+    subjlist = subj.split(',')   
+    H        = ['lh', 'rh']
+    
+    # For each subject and each hemisphere
+    for subj in subjlist:
+        for h in H:
+            # Read input files
+            # Pial surface
+            filein = os.path.join(subjdir, subj, 'surf', '{}.pial'.format(h))
+            print('Reading pial: {}'.format(filein))
+            vtxp, facp, infop, _ = lib.io.read_surf(filein)
+            vtxp = vtxp + infop['cras']
+            # White surface
+            filein = os.path.join(subjdir, subj, 'surf', '{}.white'.format(h))
+            print('Reading white: {}'.format(filein))
+            vtxw, facw, infow, _ = lib.io.read_surf(filein)
+            vtxw = vtxw + infow['cras']
+            # Cortical thickness (not calculated but loaded from FS)
+            filein = os.path.join(subjdir, subj, 'surf', '{}.thickness'.format(h))
+            print('Reading cortical thickess: {}'.format(filein))
+            thickness = lib.io.read_curv(filein)
+
+            # Compute ratio pial/white area
+            mantle = {}
+            print('Computing ratio pial/white area')
+            mantle['rpw'] = lib.surf.calc_rpw(vtxp, vtxw, facp, relative=True, voronoi=True)
+            
+            # Compute ratio FSR
+            print('Computing the Frustum Surface Ratio')
+            mantle['fsr'] = lib.surf.calc_fsr(vtxp, vtxw, facp, thickness)
+            
+            # Save results
+            outdir = os.path.join(subjdir, subj, 'after', 'mantle')
+            print('Saving results to directory: {}'.format(outdir))
+            os.makedirs(outdir, exist_ok=True)
+            for m in mantle:
+                fileout = os.path.join(outdir, '{}.{}'.format(h, m))
+                lib.io.write_curv(fileout, mantle[m], vec=None, use_ascii=False)
+    print('Finished computing cortical mantle metrics.')

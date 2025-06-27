@@ -929,13 +929,13 @@ def calc_rpw(vtxp, vtxw, fac, relative=False, voronoi=True):
     
     # Compute the ratios
     if relative: # Difference in relation to the mean
-        rpw    = (areavp-areavw) / (areavp+areavw) * 2
+        rpw    = (areavp-areavw) / (areavp+areavw)
     else: # Simple ratio, as in the original paper
-        rpw    = areavp/areavw
+        rpw    = areavp / areavw
     return rpw
 
 # =============================================================================
-def calc_fsr(vtxp, vtxw, fac, thickness):
+def calc_fsr(vtxp, vtxw, fac, thickness, relative=False):
     '''
     Compute the Frustum Surface Ratio (FSR).
 
@@ -966,5 +966,8 @@ def calc_fsr(vtxp, vtxw, fac, thickness):
     Ve  = calc_volume(vtxp, vtxw, fac, method='product',
                       area='pial', thickness=thickness)
     Va  = calc_volume(vtxp, vtxw, fac, method='analytical')
-    fsr = Ve/Va
+    if relative:
+        fsr = (Ve-Va) / (Ve+Va)
+    else:
+        fsr = Ve / Va
     return fsr

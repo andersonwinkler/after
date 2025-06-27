@@ -548,7 +548,7 @@ if ${DOCURVATURES} || ${DOALL} ; then
    check_files ${FILELIST} "computation of curvatures"
    
    # Compute the curvatures
-   ${AFTERDIR}/curvatures --subj ${subj} --subjdir "${SUBJECTS_DIR}" --surf pial,white ${PROGRESS}
+   echo ${AFTERDIR}/curvatures --subj ${subj} --subjdir "${SUBJECTS_DIR}" --surf pial,white ${PROGRESS}
    ${AFTERDIR}/mantle     --subj ${subj} --subjdir "${SUBJECTS_DIR}"
 fi
 
@@ -592,6 +592,6 @@ if ${DOVIEWS} || ${DOALL} ; then
    (${DOCURVATURES}   || ${DOALL}) && OPTS="${OPTS} --curvatures --mantle"
    (${DOLGI}          || ${DOALL}) && OPTS="${OPTS} --lgi"
    (${DOMYELIN}       || ${DOALL}) && OPTS="${OPTS} --myelin"
-   ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
+   ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" --defaults ${OPTS}
 fi
 

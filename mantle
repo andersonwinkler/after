@@ -60,7 +60,7 @@ if __name__ == "__main__":
             # Cortical thickness (not calculated but loaded from FS)
             filein = os.path.join(subjdir, subj, 'surf', '{}.thickness'.format(h))
             print('Reading cortical thickess: {}'.format(filein))
-            thickness = lib.io.read_curv(filein)
+            thickness = lib.io.read_curv(filein)[0]
 
             # Compute ratio pial/white area
             mantle = {}
@@ -69,11 +69,11 @@ if __name__ == "__main__":
             
             # Compute ratio FSR
             print('Computing the Frustum Surface Ratio')
-            mantle['fsr'] = lib.surf.calc_fsr(vtxp, vtxw, facp, thickness)
+            mantle['fsr'] = lib.surf.calc_fsr(vtxp, vtxw, facp, thickness, relative=True)
             
             # Compute the distance between white and pial (a kind of thickness)
             print('Computing distance between white and pial')
-            mantle['dpw'] = lib.surf.surf_dist(vtxp, vtxw)
+            mantle['dpw'] = lib.surf.surf_dist(vtxp, vtxw)[0]
             
             # Save results
             outdir = os.path.join(subjdir, subj, 'after', 'mantle')

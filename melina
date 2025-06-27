@@ -194,28 +194,30 @@ if [[ ${TYPE} == "T2" ]] || [[ ${TYPE} == "FLAIR" ]] ; then
    fi
 
    # Compute the ratio between myelin at the 90% of the cortex height over 10% of the height
-   if [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz ]] && \
-      [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz ]] ; then
-      ${FREESURFER_HOME}/bin/fscalc \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz sub \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz \
-         --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz
-      ${FREESURFER_HOME}/bin/fscalc \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz add \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz div 2 \
-         --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.mean.mgz
-      ${FREESURFER_HOME}/bin/fscalc \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz div \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.mean.mgz \
-         --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.r91.mgz
-      ${FREESURFER_HOME}/bin/mris_convert -c \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.r91.mgz \
-         ${SUBJECTS_DIR}/${subj}/surf/${h}.white \
-         ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.r91
-     rm -rf ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz \
-            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.mean.mgz \
-            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.r91.mgz
-   fi
+   for h in lh rh ; do
+      if [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz ]] && \
+         [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz ]] ; then
+         ${FREESURFER_HOME}/bin/fscalc \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz sub \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz \
+            --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz
+         ${FREESURFER_HOME}/bin/fscalc \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz add \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz \
+            --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.sum.mgz
+         ${FREESURFER_HOME}/bin/fscalc \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz div \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.sum.mgz \
+            --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.rpw.mgz
+         ${FREESURFER_HOME}/bin/mris_convert -c \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.rpw.mgz \
+            ${SUBJECTS_DIR}/${subj}/surf/${h}.white \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.rpw
+        rm -rf ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz \
+               ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.sum.mgz \
+               ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.rpw.mgz
+      fi
+   done
 
    # Now we delete specifically the files we created earlier
    if [[ ${PF_LIST} != "" ]] ; then

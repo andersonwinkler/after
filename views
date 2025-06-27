@@ -60,16 +60,14 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
         else:
             raise ValueError('Surface file name must start with "lh" or "rh".')
     else:
-        fnam = os.path.join(subjdir, sub, specs['surfaces'][surf]['dir'], 'lh.{}'.format(surf))
-        if os.path.exists(fnam):
-            surfname['lh'] = fnam
-        else:
-            raise ValueError('File does not exist: {}.'.format(fnam))
-        fnam = os.path.join(subjdir, sub, specs['surfaces'][surf]['dir'], 'rh.{}'.format(surf))
-        if os.path.exists(fnam):
-            surfname['rh'] = fnam
-        else:
-            raise ValueError('File does not exist: {}.'.format(fnam))
+        for h in ('lh','rh'):
+            fnam = os.path.join(subjdir, sub, 
+                                specs['surfaces'][surf]['dir'], 
+                                specs['surfaces'][surf]['file'].format_map({'hemi':h, 'surf':surf}))
+            if os.path.exists(fnam):
+                surfname[h] = fnam
+            else:
+                raise ValueError('File does not exist: {}.'.format(fnam))
     
     # Load surface
     vtx = {}
@@ -90,7 +88,7 @@ def load_surf(subjdir, sub, surf, specs=None): # ==============================
         fac[h] = np.hstack((3*np.ones((fac[h].shape[0],1)).astype(int),fac[h]))
     return vtx, fac
 
-def load_meas(subjdir, sub, meas, specs=None): # ==============================
+def load_meas(subjdir, sub, surf, meas, specs=None): # ==============================
     '''
     Load overlay measure
 
@@ -100,6 +98,8 @@ def load_meas(subjdir, sub, meas, specs=None): # ==============================
         Path to subjects' dir ($SUBJECTS_DIR).
     sub : str
         Subject (a directory within subjdir).
+    surf : str
+        Surface on which meas was originally taken (if in the filename; otherwise it can be None)
     meas : str
         Overlay measure, e.g., thichness, sulc, curv, etc.
     specs: dict
@@ -128,16 +128,14 @@ def load_meas(subjdir, sub, meas, specs=None): # ==============================
         else:
             raise ValueError('Measure file name must start with "lh" or "rh".')
     else:
-        fnam = os.path.join(subjdir, sub, specs['measures'][meas]['dir'], 'lh.{}'.format(meas))
-        if os.path.exists(fnam):
-            measname['lh'] = fnam
-        else:
-            raise ValueError('File does not exist: {}.'.format(fnam))
-        fnam = os.path.join(subjdir, sub, specs['measures'][meas]['dir'], 'rh.{}'.format(meas))
-        if os.path.exists(fnam):
-            measname['rh'] = fnam
-        else:
-            raise ValueError('File does not exist: {}.'.format(fnam))
+        for h in ('lh','rh'):
+            fnam = os.path.join(subjdir, sub, 
+                                specs['measures'][meas]['dir'], 
+                                specs['measures'][meas]['file'].format_map({'hemi':h, 'surf':surf, 'meas':meas}))
+            if os.path.exists(fnam):
+                measname[h] = fnam
+            else:
+                raise ValueError('File does not exist: {}'.format(fnam))
     
     # Load data overlay
     dat = {}
@@ -152,7 +150,7 @@ def load_meas(subjdir, sub, meas, specs=None): # ==============================
         rgb = ctab[:,0:3]
     else:
         for h in ['lh', 'rh']:
-            dat[h] = lib.io.read_curv(measname[h])
+            dat[h] = lib.io.read_curv(measname[h])[0]
         rgb = None
     
     # Create "both" hemispheres
@@ -189,7 +187,7 @@ def lab2fac(lab, fac): # ======================================================
     newlab[idx2,0] = labf[idx2,2] # vtx3 has the final say
     return newlab
 
-def plot_views(vtx, fac, dat, outdir, mesh, meas, specs): # ================
+def plot_views(vtx, fac, dat, outdir, surf, meas, show, specs): # ================
     '''
     Plot views.
     '''
@@ -224,17 +222,17 @@ def plot_views(vtx, fac, dat, outdir, mesh, meas, specs): # ================
         p.view_xz()
         p.camera.elevation = specs['views'][view]['elevation']
         p.camera.azimuth   = specs['views'][view]['azimuth']
-        p.screenshot(os.path.join(outdir,'{}_{}_{}.png'.format(surf, meas, view)))
+        p.screenshot(os.path.join(outdir,'{}_{}_{}_{}.png'.format(surf, meas, show, view)))
         
         # Resize the image to create a thumbnail
-        img = Image.open(os.path.join(outdir,'{}_{}_{}.png'.format(surf, meas, view)))
+        img = Image.open(os.path.join(outdir,'{}_{}_{}_{}.png'.format(surf, meas, show, view)))
         img.thumbnail((200, 200), Image.LANCZOS)
-        img.save(os.path.join(outdir,'thumbnails','{}_{}_{}.png'.format(surf, meas, view)))
+        img.save(os.path.join(outdir,'thumbnails','{}_{}_{}_{}.png'.format(surf, meas, show, view)))
         pv.close_all()
         del p
         gc.collect()
 
-def plot_hist(dat, cbins, outdir, meas, specs): # =============================
+def plot_hist(dat, cbins, outdir, surf, meas, specs): # =============================
     '''
     Plot histogram.
     '''
@@ -297,7 +295,7 @@ def plot_hist(dat, cbins, outdir, meas, specs): # =============================
         ax.set_xlim(dlim[0], dlim[1])
         ax.set_xlabel(meas)
         ax.set_ylabel('Frequency')
-        plt.savefig(os.path.join(outdir, 'hist_{}_{}.png'.format(meas, h)),
+        plt.savefig(os.path.join(outdir, 'hist_{}_{}_{}.png'.format(surf, meas, h)),
                     dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig)
         
@@ -318,11 +316,11 @@ def plot_hist(dat, cbins, outdir, meas, specs): # =============================
         ax_thumb.spines['bottom'].set_visible(False)
         ax_thumb.spines['left'].set_visible(False)
         plt.figure(fig_thumb.number)  # Ensure we're saving the thumbnail figure
-        plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}.png'.format(meas, h)),
+        plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h)),
                     dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig_thumb)
         
-def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
+def makehtml(htmldir, subjlist, surf, meas, show, specs): # =========================
     '''
     Make HTML file. Variables are as in the other functions.
     '''
@@ -334,14 +332,14 @@ def makehtml(htmldir, subjlist, surf, meas, specs): # =========================
             f.write('<tr>\n')
             for view in specs['views']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
-                    os.path.join(viewsdir, '{}_{}_{}.png'.format(surf, meas, view)),
-                    os.path.join(viewsdir, 'thumbnails','{}_{}_{}.png'.format(surf, meas, view)),
-                    '{}, {}, {}, {}'.format(subj, surf, meas, view)))
+                    os.path.join(viewsdir, '{}_{}_{}_{}.png'.format(surf, meas, show, view)),
+                    os.path.join(viewsdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, view)),
+                    '{}, {}, {}, {}, {}'.format(subj, surf, meas, show, view)))
             for h in ['lh', 'rh', 'bh']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
-                    os.path.join(viewsdir, 'hist_{}_{}.png'.format(meas, h)),
-                    os.path.join(viewsdir, 'thumbnails','hist_{}_{}.png'.format(meas, h)),
-                    '{}, {}, {}'.format(subj, meas, h)))
+                    os.path.join(viewsdir, 'hist_{}_{}_{}.png'.format(surf, meas, h)),
+                    os.path.join(viewsdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h)),
+                    '{}, {}, {}, {}'.format(subj, surf, meas, h)))
             f.write('</tr>\n')
         f.write('</table></body></html>')
 
@@ -409,17 +407,17 @@ if __name__ == "__main__":
     specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'views.json'))
     
     # Pairs of surfaces/measures to construct views of
-    pairs = []
+    todo = []
     if args.defaults or args.all:
-        pairs.append('defaults')
+        todo.append('defaults')
     if args.curvatures or args.all:
-        pairs.append('curvatures')
+        todo.append('curvatures')
     if args.mantle or args.all:
-        pairs.append('mantle')
+        todo.append('mantle')
     if args.myelin or args.all:
-        pairs.append('myelin')
+        todo.append('myelin')
     if args.lgi or args.all:
-        pairs.append('lgi')
+        todo.append('lgi')
 
     # For each subject
     for subj in subjlist:
@@ -431,76 +429,81 @@ if __name__ == "__main__":
         
         # Count how many figures we are making for this subject (just to print progress in the screen)
         num_views = 0
-        for pair in pairs:
-            num_views += len(specs[pair]['surf']) * len(specs[pair]['meas'])
+        for td in todo:
+            lensurf = 1 if specs[td]['surf'] is None else len(specs[td]['surf'])
+            num_views += lensurf * len(specs[td]['meas']) * len(specs[td]['show'])
             
         # For each surface and measure
         v = 0
-        for pair in pairs:
-            for surf in specs[pair]['surf']:
-                for meas in specs[pair]['meas']:
-                    v = v + 1 # Increment at the beginning
-    
-                    # Load/prepare the data
-                    if os.path.exists(os.path.join(outdir,'thumbnails','{}_{}_{}.png'.format(surf, meas, 'bhpos'))):
-                        print('- Skipping ({}/{}): {}, {}, {} (already done)'.format(v, num_views, subj, surf, meas))
-                        continue
-                    elif meas == 'nothing':
-                        vtx, fac = load_surf(subjdir, subj, surf, specs)
-                        dat = {}
-                        for h in ['lh', 'rh', 'bh']:
-                            dat[h] = np.zeros(vtx.shape[0])
-                        rgb = np.array([[1,1,1]])*.75
-                        specs['measures'][meas]['cmap'] = None
-                        specs['measures'][meas]['rgb']  = rgb
-                    elif not os.path.exists(os.path.join(subjdir, subj, specs['surfaces'][surf]['dir'], 'rh.{}'.format(surf))):
-                        print('- Skipping ({}/{}): {}, {}, {} (missing {})'.format(v, num_views, subj, surf, meas, surf))
-                        continue
-                    elif not os.path.exists(os.path.join(subjdir, subj, specs['measures'][meas]['dir'], 'rh.{}'.format(meas))):
-                        print('- Skipping ({}/{}): {}, {}, {} (missing {})'.format(v, num_views, subj, surf, meas, meas))
-                        continue
-                    else:
-                        print('- Working on ({}/{}): {}, {}, {}'.format(v, num_views, subj, surf, meas))
-                        vtx, fac = load_surf(subjdir, subj, surf, specs)
-                        dat, rgb = load_meas(subjdir, subj, meas, specs)
-                        if specs['measures'][meas]['cmap'] is None:
-                            specs['measures'][meas]['rgb'] = rgb
-                    
-                    # Define colormaps and color limits for edge cases.
-                    # All others come from the specs variable
-                    if meas not in specs['measures']:
-                        specs['measures'][meas] = {}
-                    if 'dir' not in specs['measures'][meas]:
-                        specs['measures'][meas]['dir'] = 'after'
-                    if 'dlim' not in specs['measures'][meas]:
-                        dmin = np.min(dat['bh'])
-                        dmax = np.max(dat['bh'])
-                        if dmin*dmax < 0:
-                            mx = max(abs(dmin),abs(dmax))
-                            dlim = [-mx, mx]
+        for td in todo:
+            if specs[td]['surf'] is None:
+                specs[td]['surf'] = [None]
+            for surf in specs[td]['surf']:
+                for meas in specs[td]['meas']:
+                    for show in specs[td]['show']:
+                        v = v + 1 # Increment at the beginning
+
+                        # Load/prepare the data
+                        if os.path.exists(os.path.join(outdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, 'bhpos'))):
+                            print('- Skipping ({}/{}): {}, {}, {}, {} (already done)'.format(v, num_views, subj, surf, meas, show))
+                            continue
+                        elif meas == 'nothing':
+                            print('- Working on ({}/{}): {}, {}, {}, {}'.format(v, num_views, subj, surf, meas, show))
+                            vtx, fac = load_surf(subjdir, subj, show, specs)
+                            dat = {}
+                            for h in ['lh', 'rh', 'bh']:
+                                dat[h] = np.zeros(vtx[h].shape)
+                        elif not os.path.exists(os.path.join(subjdir, subj, specs['surfaces'][show]['dir'], specs['surfaces'][show]['file'].format_map({'hemi':'rh', 'surf':show}))):
+                            print('- Skipping ({}/{}): {}, {}, {}, {} (missing surface: {})'.format(v, num_views, subj, surf, meas, show,
+                                 os.path.join(subjdir, subj, specs['surfaces'][show]['dir'], '?h.{}'.format(show))))
+                            continue
+                        elif not os.path.exists(os.path.join(subjdir, subj, specs['measures'][meas]['dir'], specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))):
+                            print('- Skipping ({}/{}): {}, {}, {}, {} (missing data: {})'.format(v, num_views, subj, surf, meas, show,
+                                 os.path.join(subjdir, subj, specs['measures'][meas]['dir'], '?h.{}.{}'.format(surf, meas))))
+                            continue
                         else:
-                            dlim = [dmin, dmax]
-                        specs['measures'][meas]['dlim'] = dlim
-                    if 'clim' not in specs['measures'][meas]:
-                        specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
-                    if 'cmap' not in specs['measures'][meas]:
-                        prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
-                        if prod < 0:
-                            specs['measures'][meas]['cmap'] = 'bwr'
-                        else:
-                            specs['measures'][meas]['cmap'] = 'viridis'
-    
-                    # Plot and save views and corresponding thumbnails
-                    plot_views(vtx, fac, dat, outdir, surf, meas, specs)
-    
-                    # Plot and save histograms and corresponding thumbnails
-                    if not os.path.exists(os.path.join(outdir,'thumbnails','hist_{}_bh.png'.format(meas))):
-                        nbins = 150
-                        plot_hist(dat, nbins, outdir, meas, specs)
+                            print('- Working on ({}/{}): {}, {}, {}, {}'.format(v, num_views, subj, surf, meas, show))
+                            vtx, fac = load_surf(subjdir, subj, show, specs)
+                            dat, rgb = load_meas(subjdir, subj, surf, meas, specs)
+                            if specs['measures'][meas]['cmap'] is None:
+                                specs['measures'][meas]['rgb'] = rgb
+                        
+                        # Define colormaps and color limits for edge cases.
+                        # All others come from the specs variable
+                        if meas not in specs['measures']:
+                            specs['measures'][meas] = {}
+                        if 'dir' not in specs['measures'][meas]:
+                            specs['measures'][meas]['dir'] = 'after'
+                        if 'dlim' not in specs['measures'][meas]:
+                            dmin = np.min(dat['bh'])
+                            dmax = np.max(dat['bh'])
+                            if dmin*dmax < 0:
+                                mx = max(abs(dmin),abs(dmax))
+                                dlim = [-mx, mx]
+                            else:
+                                dlim = [dmin, dmax]
+                            specs['measures'][meas]['dlim'] = dlim
+                        if 'clim' not in specs['measures'][meas]:
+                            specs['measures'][meas]['clim'] = specs['measures'][meas]['dlim']
+                        if 'cmap' not in specs['measures'][meas]:
+                            prod = specs['measures'][meas]['dlim'][0]*specs['measures'][meas]['dlim'][1]
+                            if prod < 0:
+                                specs['measures'][meas]['cmap'] = 'bwr'
+                            else:
+                                specs['measures'][meas]['cmap'] = 'viridis'
+        
+                        # Plot and save views and corresponding thumbnails
+                        plot_views(vtx, fac, dat, outdir, surf, meas, show, specs)
+        
+                        # Plot and save histograms and corresponding thumbnails
+                        if not os.path.exists(os.path.join(outdir,'thumbnails','hist_{}_bh.png'.format(meas))):
+                            nbins = 150
+                            plot_hist(dat, nbins, outdir, surf, meas, specs)
 
     # For each combination of surfaces and meshes, make an HTML file
     if args.htmldir is not None and args.htmldir != '':
-        for pair in pairs:
-            for surf in specs[pair]['surf']:
-                for meas in specs[pair]['meas']:
-                    makehtml(args.htmldir, subjlist, surf, meas, specs)
+        for td in todo:
+            for surf in specs[todo]['surf']:
+                for meas in specs[todo]['meas']:
+                    for show in specs[todo]['show']:
+                        makehtml(args.htmldir, subjlist, surf, meas, show, specs)

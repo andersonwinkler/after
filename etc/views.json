@@ -16,7 +16,7 @@
   },
   "myelin": {
     "surf": null,
-    "meas": ["gwc", "myelin.f_0.1", "myelin.f_0.5", "myelin.f_0.9", "myelin.rpw"],
+    "meas": ["gwc", "myelin.f0.1", "myelin.f0.5", "myelin.f0.9", "myelin.rpw"],
     "show": ["inflated", "pial", "white"]
   },
   "lgi": {
@@ -65,14 +65,14 @@
     "SI":                   {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [-1.0, 1.0],   "cmap": "bwr",    "clim": [-1.0, 1.0]},
     "SH2SH":                {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [0, 1],        "cmap": "spring", "clim": [0, 0.75]},
     "voronoi_area":         {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [0, 2],        "cmap": "spring", "clim": [0, 1.5]},
-    "FD":                   {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [0, 4],        "cmap": "spring", "clim": [1, 3]},
+    "FD":                   {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [1, 3],        "cmap": "bwr",    "clim": [1.5, 2.5]},
     "rpw":                  {"dir": "after/mantle", "file": "{hemi}.{meas}",        "dlim": [-1, 1],       "cmap": "bwr",    "clim": [-0.75, 0.75]},
     "fsr":                  {"dir": "after/mantle", "file": "{hemi}.{meas}",        "dlim": [-0.6, 0.6],   "cmap": "bwr",    "clim": [-0.4, 0.4]},
     "dpw":                  {"dir": "after/mantle", "file": "{hemi}.{meas}",        "dlim": [0.5, 5],      "cmap": "spring", "clim": [1, 4.5]},
     "gwc":                  {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [-40, 40],     "cmap": "bwr",    "clim": [-35, 35]},
-    "myelin.f_0.1":         {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [0, 6],        "cmap": "spring", "clim": [1, 5]},
-    "myelin.f_0.5":         {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [0, 6],        "cmap": "spring", "clim": [1, 5]},
-    "myelin.f_0.9":         {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [0, 6],        "cmap": "spring", "clim": [1, 5]},
+    "myelin.f0.1":          {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [0, 6],        "cmap": "spring", "clim": [1, 5]},
+    "myelin.f0.5":          {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [0, 6],        "cmap": "spring", "clim": [1, 5]},
+    "myelin.f0.9":          {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [0, 6],        "cmap": "spring", "clim": [1, 5]},
     "myelin.rpw":           {"dir": "after/myelin", "file": "{hemi}.{meas}",        "dlim": [-0.5, 0.5],   "cmap": "bwr",    "clim": [-0.3, 0.3]},
     "lgi":                  {"dir": "surf",         "file": "{hemi}.{surf}_{meas}", "dlim": [1, 5],        "cmap": "spring", "clim": [2, 4]}
   },

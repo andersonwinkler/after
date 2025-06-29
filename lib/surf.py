@@ -578,7 +578,8 @@ def avg_edge_len_per_face(tri):
 # =============================================================================
 def calc_fd(vtx, fac, fsmode=True):
     '''
-    Compute the fractal dimension using our inhouse method.
+    Compute the fractal dimension using our inhouse method,
+    valid for an icosahedron recursively subdivided.
 
     Parameters
     ----------
@@ -971,3 +972,111 @@ def calc_fsr(vtxp, vtxw, fac, thickness, relative=False):
     else:
         fsr = Ve / Va
     return fsr
+
+# =============================================================================
+def geodesic_distances(vtx, fac, method='dijkstra', maxdist=None, maxfwhm=None, iterate_vtx=False):
+    '''
+    Compute geodesic distances in the mesh, all versus all. Returns an
+    array vertices by vertices with the distances.
+    
+    References:
+    * Crane K, Weischedel C, Wardetzky M. Geodesics in heat: A new approach to
+      computing distance based on heat flow. ACM Trans Graph. 2013 Sep;32(5):1–11. 
+    * Mitchell JSB, Mount DM, Papadimitriou CH. The Discrete Geodesic Problem.
+      SIAM J Comput. 1987 Aug;16(4):647–668. 
+    * Dijkstra EW. A note on two problems in connexion with graphs.
+      Numer Math. 1959 Dec;1(1):269–271. 
+
+    Parameters
+    ----------
+    vtx : NumPy array, num vertices by 3
+        Vertex coordinates
+    fac : NumPy array, num faces by 3
+        Face indices.
+    method : str, optional
+        Method to use. Choose among 'mitchell', 'crane', or 'dijkstra'.
+        The default is 'dijkstra'.
+    maxdist : float, optional
+        For the Mitchell method, how far to compute the distance? Larger
+        values are slower. For pairs outside the range, the distance will be
+        marked as 0 (zero). The default is None, meaning no max distance.
+    maxfwhm : float, optional
+        For the Mitchell method, what's the maximum intended FWHM, in case
+        these distances are used for smoothing. The default is None, meaning
+        no upper limit.
+    iterate_vtx = bool, optional
+        For the Mitchell method, whether compute all distances from one vertex
+        at a time (slower), or all vertices simultaneously. Default is False.
+    
+    If both maxdist and maxfwhm are provided, the maximum distance among the
+    two will be used.
+
+    Returns
+    -------
+    dist : NumPy array, num vertices by num vertices
+        Matrix with all pairwise vertex distances.
+    '''
+    
+    # Number of vertices
+    nV = vtx.shape[0]
+    
+    if method.lower() in ['mitchell', 'exact', 'mmp']:
+        # Use the method by Mitchell, Mount, and Papadimitriou (1987).
+        # This is exact but very slow for meshes with more than a few hundred vertices.
+        import gdist
+        
+        # Convert to native byte order
+        vtx_native = vtx.astype(np.float64, order='C', copy=True)
+        fac_native = fac.astype(np.int32,   order='C', copy=True)
+        vtx_native = np.ascontiguousarray(vtx_native, dtype=np.float64)
+        fac_native = np.ascontiguousarray(fac_native, dtype=np.int32)
+        
+        # How far to keep computing distances
+        if maxfwhm is None:
+            if maxdist is None:
+                maxdist = np.inf
+        else:
+            maxsigma = maxfwhm / np.sqrt(8*np.log(2))
+            if maxdist is None:
+                maxdist = 4 * maxsigma #4*sigma
+            else:
+                maxdist = max((maxdist, 4 * maxsigma))
+        
+        # Distance matrix
+        if iterate_vtx:
+            dist = np.zeros((nV,nV))
+            for v in range(nV):
+                dist[v] = gdist.compute_gdist(vtx_native, fac_native, max_distance=maxdist,
+                                              source_indices=np.array([v], dtype=np.int32))
+        else:
+            dist = gdist.local_gdist_matrix(vtx_native, fac_native, max_distance=maxdist).toarray()
+        
+    elif method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
+        # Use the method by Crane, Weischedel, and Wardetzky (2013), which
+        # uses heat diffusion for a much faster approximation, that is best for
+        # finely resolved meshes
+        import potpourri3d as pp3d
+        solver = pp3d.MeshHeatMethodDistanceSolver(vtx, fac, t_coef=1.0, use_robust=True)
+        dist   = np.zeros((nV,nV))
+        for v in range(nV):
+            dist[v] = solver.compute_distance(v)
+            
+    elif method.lower() in ['dijkstra', 'classical']:
+        # Use the classical Dijkstra algorithm, which follows edges
+        from scipy.sparse import csr_matrix
+        from scipy.sparse.csgraph import dijkstra
+        
+        # Edges
+        edg = np.concatenate((fac[:,[0,1]],fac[:,[0,2]],fac[:,[1,2]]), axis=0)
+        edg = np.unique(np.sort(edg, axis=1), axis=0)
+        
+        # Edge weights (i.e., their lengths)
+        weights = np.linalg.norm(vtx[edg[:,0]] - vtx[edg[:,1]], axis=1)
+        
+        # Adjacency matrix, with the weights, upper triangular part only
+        adj = csr_matrix((weights, (edg[:,0], edg[:,1])), shape=(nV, nV))        
+        
+        # Compute all-pairs shortest paths; we use "directed" since
+        # it's just the upper triangular part
+        dist = dijkstra(adj, directed=False, return_predecessors=False)
+    return dist

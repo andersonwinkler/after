@@ -222,12 +222,12 @@ def plot_views(vtx, fac, dat, outdir, surf, meas, show, specs): # ==============
         p.view_xz()
         p.camera.elevation = specs['views'][view]['elevation']
         p.camera.azimuth   = specs['views'][view]['azimuth']
-        p.screenshot(os.path.join(outdir,'{}_{}_{}_{}.png'.format(surf, meas, show, view)))
+        p.screenshot(os.path.join(outdir,'{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')))
         
         # Resize the image to create a thumbnail
-        img = Image.open(os.path.join(outdir,'{}_{}_{}_{}.png'.format(surf, meas, show, view)))
+        img = Image.open(os.path.join(outdir,'{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')))
         img.thumbnail((200, 200), Image.LANCZOS)
-        img.save(os.path.join(outdir,'thumbnails','{}_{}_{}_{}.png'.format(surf, meas, show, view)))
+        img.save(os.path.join(outdir,'thumbnails','{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')))
         pv.close_all()
         del p
         gc.collect()
@@ -316,7 +316,7 @@ def plot_hist(dat, cbins, outdir, surf, meas, specs): # ========================
         ax_thumb.spines['bottom'].set_visible(False)
         ax_thumb.spines['left'].set_visible(False)
         plt.figure(fig_thumb.number)  # Ensure we're saving the thumbnail figure
-        plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h)),
+        plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h).replace('None_','')),
                     dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig_thumb)
         
@@ -332,14 +332,14 @@ def makehtml(htmldir, subjlist, surf, meas, show, specs): # ====================
             f.write('<tr>\n')
             for view in specs['views']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
-                    os.path.join(viewsdir, '{}_{}_{}_{}.png'.format(surf, meas, show, view)),
-                    os.path.join(viewsdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, view)),
-                    '{}, {}, {}, {}, {}'.format(subj, surf, meas, show, view)))
+                    os.path.join(viewsdir, '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
+                    os.path.join(viewsdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
+                    '{}, {}, {}, {}, {}'.format(subj, surf, meas, show, view).replace('None,','')))
             for h in ['lh', 'rh', 'bh']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
                     os.path.join(viewsdir, 'hist_{}_{}_{}.png'.format(surf, meas, h)),
-                    os.path.join(viewsdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h)),
-                    '{}, {}, {}, {}'.format(subj, surf, meas, h)))
+                    os.path.join(viewsdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h).replace('None_','')),
+                    '{}, {}, {}, {}'.format(subj, surf, meas, h).replace('None,','')))
             f.write('</tr>\n')
         f.write('</table></body></html>')
 
@@ -444,7 +444,7 @@ if __name__ == "__main__":
                         v = v + 1 # Increment at the beginning
 
                         # Load/prepare the data
-                        if os.path.exists(os.path.join(outdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, 'bhpos'))):
+                        if os.path.exists(os.path.join(outdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, 'bhpos').replace('None_',''))):
                             print('- Skipping ({}/{}): {}, {}, {}, {} (already done)'.format(v, num_views, subj, surf, meas, show))
                             continue
                         elif meas == 'nothing':

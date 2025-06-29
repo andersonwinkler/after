@@ -179,7 +179,7 @@ if [[ ${TYPE} == "T2" ]] || [[ ${TYPE} == "FLAIR" ]] ; then
    # Project to the surface, using fraction of distance between white (0) and pial (1)
    if [[ ${PF_LIST} != "" ]] ; then
       for pf in ${PF_LIST} ; do
-         pfstr="f_${pf}"
+         pfstr="f${pf}"
          for h in lh rh ; do
             ${FREESURFER_HOME}/bin/mri_vol2surf \
                --mov ${SUBJECTS_DIR}/${subj}/after/myelin/myelin.mgz \
@@ -195,15 +195,15 @@ if [[ ${TYPE} == "T2" ]] || [[ ${TYPE} == "FLAIR" ]] ; then
 
    # Compute the ratio between myelin at the 90% of the cortex height over 10% of the height
    for h in lh rh ; do
-      if [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz ]] && \
-         [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz ]] ; then
+      if [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f0.9.mgz ]] && \
+         [[ -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f0.1.mgz ]] ; then
          ${FREESURFER_HOME}/bin/fscalc \
-            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz sub \
-            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f0.9.mgz sub \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f0.1.mgz \
             --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz
          ${FREESURFER_HOME}/bin/fscalc \
-            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.9.mgz add \
-            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f_0.1.mgz \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f0.9.mgz add \
+            ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.f0.1.mgz \
             --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.sum.mgz
          ${FREESURFER_HOME}/bin/fscalc \
             ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.diff.mgz div \
@@ -222,7 +222,7 @@ if [[ ${TYPE} == "T2" ]] || [[ ${TYPE} == "FLAIR" ]] ; then
    # Now we delete specifically the files we created earlier
    if [[ ${PF_LIST} != "" ]] ; then
       for pf in ${PF_LIST} ; do
-         pfstr="f_${pf}"
+         pfstr="f${pf}"
          for h in lh rh ; do
             rm -f ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.myelin.${pfstr}.mgz
          done
@@ -232,7 +232,7 @@ if [[ ${TYPE} == "T2" ]] || [[ ${TYPE} == "FLAIR" ]] ; then
    # Project to the surface, using a distance from the white.
    if [[ ${PD_LIST} != "" ]] ; then
       for pd in ${PD_LIST} ; do
-         pdstr="d_${pd}mm"
+         pdstr="d${pd}mm"
          for h in lh rh ; do
             ${FREESURFER_HOME}/bin/mri_vol2surf \
                --mov ${SUBJECTS_DIR}/${subj}/after/myelin/myelin.mgz \
@@ -255,7 +255,7 @@ if [[ ${DOGWC} ]] ; then
    # Project to the surface, using fraction of distance between white (0) and pial (1)
    PF_LIST="0.1 0.2 0.3 0.4 0.5 0.6"
    for pf in ${PF_LIST} ; do
-      [[ $(echo ${PF_LIST}|wc -w) -gt 1 ]] && pfstr="f_${pf}" || pfstr=""
+      [[ $(echo ${PF_LIST}|wc -w) -gt 1 ]] && pfstr="f${pf}" || pfstr=""
       ${FREESURFER_HOME}/bin/mri_vol2surf \
          --mov ${SUBJECTS_DIR}/${subj}/mri/nu.mgz \
          --regheader ${subj} --projfrac ${pf} --interp trilinear \
@@ -265,7 +265,7 @@ if [[ ${DOGWC} ]] ; then
    # Project to the surface, using a distance from the white.
    PD_LIST="0.15 0.30 0.45 0.60 0.75 0.90 1.05 1.20 1.35 1.50"
    for pd in ${PD_LIST} ; do
-      [[ $(echo ${PD_LIST}|wc -w) -gt 1 ]] && pdstr="d_${pd}mm" || pdstr=""
+      [[ $(echo ${PD_LIST}|wc -w) -gt 1 ]] && pdstr="d${pd}mm" || pdstr=""
       ${FREESURFER_HOME}/bin/mri_vol2surf \
          --mov ${SUBJECTS_DIR}/${subj}/mri/nu.mgz \
          --regheader ${subj} --projdist -${pd} --interp trilinear \
@@ -274,32 +274,32 @@ if [[ ${DOGWC} ]] ; then
 
    # Average the layers, then compute the difference and normalize by the mean
    ${FREESURFER_HOME}/bin/fscalc \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.1.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.2.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.3.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.4.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.5.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.6.mgz div 6 \
-      --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_avg.mgz
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.1.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.2.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.3.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.4.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.5.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.6.mgz div 6 \
+      --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.favg.mgz
    ${FREESURFER_HOME}/bin/fscalc \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.15mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.30mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.45mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.60mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.75mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.90mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.05mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.20mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.35mm.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.50mm.mgz div 10 \
-      --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_avg.mgz
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.15mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.30mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.45mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.60mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.75mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.90mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.05mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.20mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.35mm.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.50mm.mgz div 10 \
+      --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.davg.mgz
    ${FREESURFER_HOME}/bin/fscalc \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_avg.mgz sub \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_avg.mgz mul 100 \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.davg.mgz sub \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.favg.mgz mul 100 \
       --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.gwc.diff.mgz
    ${FREESURFER_HOME}/bin/fscalc \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_avg.mgz add \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_avg.mgz div 2 \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.davg.mgz add \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.favg.mgz div 2 \
       --o ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.gwc.mean.mgz
    ${FREESURFER_HOME}/bin/fscalc \
       ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.gwc.diff.mgz div \
@@ -312,24 +312,24 @@ if [[ ${DOGWC} ]] ; then
 
    # Remove unused files
    rm -f \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.1.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.2.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.3.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.4.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.5.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_0.6.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.15mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.30mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.45mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.60mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.75mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_0.90mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.05mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.20mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.35mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_1.50mm.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f_avg.mgz \
-      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d_avg.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.1.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.2.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.3.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.4.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.5.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.f0.6.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.15mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.30mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.45mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.60mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.75mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d0.90mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.05mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.20mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.35mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.d1.50mm.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.graylayer.favg.mgz \
+      ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.whitelayer.davg.mgz \
       ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.gwc.diff.mgz \
       ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.gwc.mean.mgz \
       ${SUBJECTS_DIR}/${subj}/after/myelin/${h}.gwc.mgz

@@ -358,6 +358,16 @@ if ${DOBASE} || ${DOALL} ; then
 fi
 
 # =====================================================================
+# Compute the Euler number, good for QC
+if ${DOBASE} || ${DORETESSELLATE} || ${DOALL} ; then
+   for h in lh rh ; do
+      ${FREESURFER_HOME}/bin/mris_euler_number ${SUBJECTS_DIR}/${subj}/surf/${h}.orig.nofix \
+                                               |tail -n 1|awk '{print $NF}' > \
+                                               ${SUBJECTS_DIR}/${subj}/after/${h}.euler.txt
+   done
+fi
+
+# =====================================================================
 # Do the retessellation
 if ${DORETESSELLATE} || ${DOALL} ; then
 
@@ -548,7 +558,7 @@ if ${DOCURVATURES} || ${DOALL} ; then
    check_files ${FILELIST} "computation of curvatures"
    
    # Compute the curvatures
-   echo ${AFTERDIR}/curvatures --subj ${subj} --subjdir "${SUBJECTS_DIR}" --surf pial,white ${PROGRESS}
+   ${AFTERDIR}/curvatures --subj ${subj} --subjdir "${SUBJECTS_DIR}" --surf pial,white ${PROGRESS}
    ${AFTERDIR}/mantle     --subj ${subj} --subjdir "${SUBJECTS_DIR}"
 fi
 

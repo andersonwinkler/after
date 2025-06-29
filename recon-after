@@ -80,6 +80,11 @@ Options:
   structures. If --subseg was used, will compute partial volume effects also for
   subsegmented structures.
   
+--smooth
+  Compute matrix of geodesic distances between every two vertices in the 
+  white and pial surfaces. Data will not be smoothed, only the distances
+  be pre-calculated.
+
 --views
   Capture orthogonal views of surfaces and overlays, useful for quick
   inspection. These can be used to create an HTML file (see documentation).
@@ -166,6 +171,7 @@ DOLGI=false             # Compute the LGI
 DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
 DOSUBREG=false          # Run substructure segmentations
 DOPVE=false             # Compute partial volume effects
+DOSMOOTH=false          # Compute pairwise distance between vertices
 DOVIEWS=false           # Capture views for later inspection
 PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
 
@@ -219,6 +225,10 @@ while [[ ${#} -gt 0 ]] ; do
       ;;
    -subregions|--subregions)
       DOSUBREG=true
+      shift
+      ;;
+   -smooth|--smooth)
+      DOSMOOTH=true
       shift
       ;;
    -views|--views)
@@ -596,6 +606,19 @@ if ${DOSUBREG} || ${DOALL} ; then
 fi
 
 # =====================================================================
+# Prepare a matrix of geodesic distances for subsequent smoothing
+if ${DOSMOOTH} || ${DOALL} ; then
+   mkdir -p ${SUBJECTS_DIR}/${subj}/after/smooth
+   for surf in pial white ; do
+      for h in lh rh ; do
+         ${AFTERDIR}/smooth --surf ${SUBJECTS_DIR}/${subj}/surf/${h}.${surf} \
+                            --method crane \
+                            --outdist ${SUBJECTS_DIR}/${subj}/after/smooth/${h}.${surf}.distances.h5
+      done
+   done
+fi
+
+# =====================================================================
 # Make nice figures and histograms for visual inspection
 if ${DOVIEWS} || ${DOALL} ; then
    OPTS=""
@@ -604,4 +627,5 @@ if ${DOVIEWS} || ${DOALL} ; then
    (${DOMYELIN}       || ${DOALL}) && OPTS="${OPTS} --myelin"
    ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" --defaults ${OPTS}
 fi
+
 

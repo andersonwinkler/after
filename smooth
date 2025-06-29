@@ -9,6 +9,7 @@ Created on Sat Jun 28 15:11:38 2025
 import argparse
 import numpy as np
 import h5py
+import time
 
 import lib
 
@@ -18,8 +19,7 @@ def create_empty_hdf5(filename, rows, cols, dtype=np.float64):
         # Column-optimized chunking
         chunk_cols = min(64, cols)
         chunks     = (rows, chunk_cols)        
-        f.create_dataset(
-            'matrix',
+        f.create_dataset(   'matrix',
             shape            = (rows, cols),
             dtype            = dtype,
             chunks           = chunks,
@@ -55,15 +55,9 @@ if __name__ == "__main__":
     parser.add_argument('--in', dest='infile',
                         help="Path to the file with data to be smoothed.",
                         type=str, required=False, default=None)
-    parser.add_argument('--it', dest='intype',
-                        help="Input type (file format)",
-                        type=str, required=False, default='curv')
     parser.add_argument('--out', dest='outfile',
                         help="Path to the file to be created with smoothed data.",
                         type=str, required=False, default=None)
-    parser.add_argument('--ot', dest='outtype',
-                        help="Output type (file format)",
-                        type=str, required=False, default='curv')
     parser.add_argument('--fwhm', dest='fwhm',
                         help="FWHM to smooth the data.",
                         type=float, required=False, default=10)
@@ -73,17 +67,25 @@ if __name__ == "__main__":
                         action='store_true', required=False, default=False)
     args = parser.parse_args()
     
-    # Sanity check
-    if args.indist is not None and args.outdist is not None:
-        raise ValueError('Error: Cannot use --indist together with --outdist.')
-    if args.indist is None and args.outdist is None:
-        raise ValueError('Error: Missing --outdist.')
-    
-    create = True
+    # Sanity checks
+    create = False
     apply  = False
-    
-    if   create and not apply:
-
+    if args.surf is not None or args.outdist is not None:
+        create = True
+    if args.indist is not None or args.infile is not None:
+        apply = True
+    if args.surf is not None and args.indist is not None:
+        raise ValueError('Error: Cannot use --indist together with --surf or --outdist.')
+    if create and (args.surf is None or args.outdist is None):
+        raise ValueError('Error: If creating a distance matrix, need both --surf and --outdist.')
+    if args.outdist is not None:
+        if not args.outdist.endswith('.h5'):
+            args.outdist = args.outdist + '.h5'
+            
+    # Fork according to the 3 main cases
+    if   create and not apply: # ==============================================
+        # Case 1: Create a distance matrix and save it. Don't smooth any data.
+        
         # Read surface file
         vtx, fac, _, _ = lib.io.read_surf(args.surf)
         nV = vtx.shape[0]
@@ -111,7 +113,10 @@ if __name__ == "__main__":
             # Open the HDF5 file for writing, then iterate over vertices to
             # compute the distances and storing
             with h5py.File(args.outdist, 'r+') as f:
+                start_time = time.time()
                 for v in range(nV):
+                    if args.progress:
+                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
                     f['matrix'][:,v] = gdist.compute_gdist(vtx_native, fac_native,
                                                            max_distance   = maxdist,
                                                            source_indices = np.array([v],
@@ -127,11 +132,14 @@ if __name__ == "__main__":
             # Open the HDF5 file for writing, then iterate over vertices to
             # compute the distances and storing
             with h5py.File(args.outdist, 'r+') as f:
+                start_time = time.time()
                 for v in range(nV):
+                    if args.progress:
+                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
                     f['matrix'][:,v] = solver.compute_distance(v)        
 
-    elif apply and not create:
-        # Smooth data by applying an existing matrix of distances
+    elif apply and not create: # ==============================================
+        # Case 2: Apply an existing distance matrix to smooth data.
         import scipy as sp
         
         # Read input data
@@ -142,7 +150,10 @@ if __name__ == "__main__":
         # With the HDF5 file open, smooth each vertex
         sdata   = np.zeros(data.shape)
         with h5py.File(args.indist,'r') as f:
+            start_time = time.time()
             for v in range(nV):
+                if args.progress:
+                    lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
                 dist = f['matrix'][:,v]
                 dist[dist==0] = np.inf
                 dist[v]  = 0
@@ -151,9 +162,10 @@ if __name__ == "__main__":
                 sdata[v] = np.sum(data * height)
 
         # Save smoothed data
-        lib.io.write_curv(args.out, sdata)
+        lib.io.write_curv(args.outfile, sdata)
         
-    elif create and apply:
+    elif create and apply: # ==================================================
+        # Case 3: Create and apply an existing distance matrix to smooth data.
         import scipy as sp
         
         # Read surface file
@@ -189,7 +201,10 @@ if __name__ == "__main__":
             # compute the distances and storing
             sdata   = np.zeros(data.shape)
             with h5py.File(args.outdist, 'r+') as f:
+                start_time = time.time()
                 for v in range(nV):
+                    if args.progress:
+                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
                     dist = gdist.compute_gdist(vtx_native, fac_native,
                                                max_distance   = maxdist,
                                                source_indices = np.array([v],
@@ -212,7 +227,10 @@ if __name__ == "__main__":
             # compute the distances and storing
             sdata   = np.zeros(data.shape)
             with h5py.File(args.outdist, 'r+') as f:
+                start_time = time.time()
                 for v in range(nV):
+                    if args.progress:
+                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
                     dist = solver.compute_distance(v)
                     f['matrix'][:,v] = dist
                     height   = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
@@ -220,4 +238,8 @@ if __name__ == "__main__":
                     sdata[v] = np.sum(data * height)
 
         # Save smoothed data
-        lib.io.write_curv(args.out, sdata)
+        lib.io.write_curv(args.outfile, sdata)
+    
+    else:
+        parser.print_help()
+        raise ValueError('Nothing to do.')

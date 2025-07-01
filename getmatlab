@@ -11,8 +11,8 @@
 
 # Specify here the path to Octave as you want to use:
 #set OCTAVEBIN = "/usr/bin/octave"
-set OCTAVEBIN = "flatpak run --filesystem=/tmp org.octave.Octave"
-#set OCTAVEBIN = "flatpak run --filesystem=/tmp --user org.octave.Octave"
+#set OCTAVEBIN = "flatpak run --filesystem=/tmp org.octave.Octave"
+set OCTAVEBIN = "flatpak run --filesystem=/tmp --user org.octave.Octave"
 
 # There should be no need to make changes beyond this point ====================
 # Check if FS is defined

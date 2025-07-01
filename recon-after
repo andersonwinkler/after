@@ -56,7 +56,7 @@ Options:
            you want to refine with T2 or FLAIR.
   "T2":    Specifies that you want to use T2 to refine the pial.
   "FLAIR": Specifies that you want to use FLAIR to refine the pial.
-  Default is "auto".
+  Default is "no".
 
 --curvatures
   Compute various curvature metrics and their composites. The ?h.white
@@ -165,7 +165,7 @@ NEW_SUBJECTS_DIR=""     # New subjects dir to store outputs. Will be replaced be
 DOALL=false             # Do everything
 DOBASE=false            # Do a basic reconstruction up to surface registration
 DORETESSELLATE=false    # Do the retessellation
-DOREFINE="auto"         # How to deal with refining
+DOREFINE="no"           # How to deal with refining
 DOCURVATURES=false      # Compute the better curvatures and their composites
 DOLGI=false             # Compute the LGI
 DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
@@ -315,8 +315,8 @@ IN_T2W=""
 IN_FLA=""
 if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] ; then
    T1W_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_T1w.nii"   -o -name "*_T1w.nii.gz"   \)|sort -r)
-   T2W_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_T2w.nii"   -o -name "*_T2w.nii.gz"   \)|sort -r)
-   FLA_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_FLAIR.nii" -o -name "*_FLAIR.nii.gz" \)|sort -r)
+   T2W_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_T2w.nii"   -o -name "*_T2w.nii.gz"   \)|tail -n 1)
+   FLA_LIST=$(find -L ${IN_DIR}/${subj} -type f \( -name "*_FLAIR.nii" -o -name "*_FLAIR.nii.gz" \)|tail -n 1)
    for f in ${T1W_LIST} ; do
       IN_T1W="-i $(readlink -f ${f}) ${IN_T1W}"
    done
@@ -408,92 +408,53 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       exit 1
    fi
 
-   # Decide how to deal with T2 and/or FLAIR and refining the pial surface
+   # Will we import T2 or FLAIR files? If so, decide now based on previously located files, if available
+   if [[ -f ${INPUTS} ]] ; then
+      IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
+      IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
+   else
+      IN_T2W=""
+      IN_FLA=""
+   fi
+   OPTS="${IN_T2W} ${IN_FLA}"
+   
+   # Decide whether and how we'll refine the pial
    case ${DOREFINE} in
 
-      no) # No refining of the pial after retessellating
-         OPTS=""
-         ;;
-
-      T2) # Refine using the T2
-         OPTS=""
+      no|n) # No refining of the pial after retessellating
          T2pial=false
-         if [[ -f ${INPUTS} ]] ; then
-            IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
-            if [[ ! -z ${IN_T2W} ]] ; then
-               OPTS="${IN_T2W}"
-               T2pial=true
-            else
-               echo "Error: No T2 inputs are available for ${subj}."
-               exit 1
-            fi
-         else
-            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
-         fi
-         ${T2pial} && OPTS="${OPTS} -T2pial"
-         ;;
-
-      FLAIR) # Refine using the FLAIR
-         OPTS=""
          FLAIRpial=false
-         if [[ -f ${INPUTS} ]] ; then
-            IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
-            if [[ ! -z ${IN_FLA} ]] ; then
-               OPTS="${IN_FLA}"
-               FLAIRpial=true
-            else
-               echo "Error: No FLAIR inputs are available for ${subj}."
-               exit 1
-            fi
-         else
-            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true            
-         fi
-         ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
          ;;
-
+      T2|t2) # Refine using the T2
+         T2pial=true
+         FLAIRpial=false
+         ;;
+      FLAIR|flair) # Refine using the FLAIR
+         T2pial=false
+         FLAIRpial=true
+         ;;
       auto) # Discover automatically whether to do T2 or FLAIR
-         OPTS=""
          T2pial=false
+         [[ ! -z ${IN_T2W} ]] && T2pial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
+         [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
          FLAIRpial=false
-         if [[ -f ${INPUTS} ]] ; then
-            IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
-            IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
-            if [[ ! -z ${IN_T2W} ]] ; then
-               OPTS="${IN_T2W}"
-               T2pial=true
-            fi
-            if [[ ! -z ${IN_FLA} ]] ; then
-               OPTS="${IN_FLA}"
-               FLAIRpial=true
-            fi
-         else
-            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-T2pial"|wc -l) -gt 0 ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/T2raw.mgz    ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/T2.mgz            ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.T2       ]] && T2pial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.T2       ]] && T2pial=true
-            [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
-            [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true 
-         fi
+         [[ ! -z ${IN_FLA} ]] && FLAIRpial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/mri/orig/FLAIRraw.mgz ]] && FLAIRpial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/mri/FLAIR.mgz         ]] && FLAIRpial=true
+         [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
+         [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true 
          if ${T2pial} && ${FLAIRpial} ; then
-            echo "Error: Cannot use both T2 and FLAIR for ${subj}."
+            echo "Error: Cannot use both T2 and FLAIR to refine the pial for ${subj}. You have to choose one explicitly."
             exit 1
          fi
          ${T2pial}    && OPTS="${OPTS} -T2pial"
          ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
          ;;
-
       *)
          echo "Error: Unknown --refine option ${key} for subject ${subj}"
          exit 1
@@ -541,8 +502,8 @@ if ${DORETESSELLATE} || ${DOALL} ; then
    # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
    for h in lh rh ; do
       echo ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
-                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
-                           --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
+                                --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
+                                --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
    done
 
    # Create the retessellated midthickness surface (not a typical FS output but sometimes created by other programs)

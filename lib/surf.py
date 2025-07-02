@@ -967,10 +967,15 @@ def calc_fsr(vtxp, vtxw, fac, thickness, relative=False):
     Ve  = calc_volume(vtxp, vtxw, fac, method='product',
                       area='pial', thickness=thickness)
     Va  = calc_volume(vtxp, vtxw, fac, method='analytical')
+    fsr = np.zeros(Ve.shape)
     if relative:
-        fsr = (Ve-Va) / (Ve+Va)
+        d   = Ve - Va
+        s   = Ve + Va
+        idx = s != 0
+        fsr[idx] = d[idx] / s[idx]
     else:
-        fsr = Ve / Va
+        idx = Va != 0
+        fsr[idx] = Ve[idx] / Va[idx]
     return fsr
 
 # =============================================================================

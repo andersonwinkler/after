@@ -350,21 +350,21 @@ if ${DOBASE} || ${DOALL} ; then
       -norandomness \
       ${IN_T1W}
 
-   # Check if recon-all finished without error and make sure that that termination was just now
-   result=($(check_fs))
-   if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 5 ]] ; then
-      echo "Error: recon-all either failed or finished a long time (more than 5 seconds) ago."
-      echo "       Cannot confirm surface reconstruction and registration were successful."
-      echo "       Check the log files."
-      exit 1
-   fi
-
    # Keep track of T2 and FLAIR to import later when doing the retessellation
    # (if we were to import them now, recon-all in FS 8.0.0 would crash)
    mkdir -p ${SUBJECTS_DIR}/${subj}/after
    echo "${IN_T1W}"  > ${INPUTS}
    echo "${IN_T2W}" >> ${INPUTS}
    echo "${IN_FLA}" >> ${INPUTS}
+
+   # Check if recon-all finished without error and make sure that that termination was just now
+   result=($(check_fs))
+   if [[ ${result[0]} != "success" ]] || [[ ${result[1]} -gt 10 ]] ; then
+      echo "Error: recon-all either failed or finished a long time (more than 10 seconds) ago."
+      echo "       Cannot confirm surface reconstruction and registration were successful."
+      echo "       Check the log files."
+      exit 1
+   fi
 fi
 
 # =====================================================================
@@ -568,7 +568,7 @@ fi
 
 # =====================================================================
 # Prepare a matrix of geodesic distances for subsequent smoothing
-if ${DOSMOOTH} || ${DOALL} ; then
+if ${DOSMOOTH} ; then
    mkdir -p ${SUBJECTS_DIR}/${subj}/after/smooth
    for surf in pial white ; do
       for h in lh rh ; do

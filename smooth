@@ -117,10 +117,11 @@ if __name__ == "__main__":
                 for v in range(nV):
                     if args.progress:
                         lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                    f['matrix'][:,v] = gdist.compute_gdist(vtx_native, fac_native,
+                    dist = gdist.compute_gdist(vtx_native, fac_native,
                                                            max_distance   = maxdist,
                                                            source_indices = np.array([v],
                                                            dtype          = np.int32))
+                    f['matrix'][:,v] = np.exp(-dist)
 
         elif args.method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
             # Use the method by Crane, Weischedel, and Wardetzky (2013), which
@@ -136,7 +137,8 @@ if __name__ == "__main__":
                 for v in range(nV):
                     if args.progress:
                         lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                    f['matrix'][:,v] = solver.compute_distance(v)        
+                    dist = solver.compute_distance(v)     
+                    f['matrix'][:,v] = np.exp(-dist)   
 
     elif apply and not create: # ==============================================
         # Case 2: Apply an existing distance matrix to smooth data.
@@ -154,12 +156,10 @@ if __name__ == "__main__":
             for v in range(nV):
                 if args.progress:
                     lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                dist = f['matrix'][:,v]
-                dist[dist==0] = np.inf
-                dist[v]  = 0
-                height   = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
-                height   = height/height.sum()
-                sdata[v] = np.sum(data * height)
+                dist     = -np.log(f['matrix'][:,v])
+                filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
+                filt     = filt/filt.sum()
+                sdata[v] = np.sum(data * filt)
 
         # Save smoothed data
         lib.io.write_curv(args.outfile, sdata)
@@ -209,12 +209,10 @@ if __name__ == "__main__":
                                                max_distance   = maxdist,
                                                source_indices = np.array([v],
                                                dtype          = np.int32))
-                    f['matrix'][:,v] = dist
-                    dist[dist==0] = np.inf
-                    dist[v]  = 0
-                    height   = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
-                    height   = height/height.sum()
-                    sdata[v] = np.sum(data * height)
+                    f['matrix'][:,v] = np.exp(-dist)
+                    filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
+                    filt     = filt/filt.sum()
+                    sdata[v] = np.sum(data * filt)
 
         elif args.method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
             # Use the method by Crane, Weischedel, and Wardetzky (2013), which
@@ -232,10 +230,10 @@ if __name__ == "__main__":
                     if args.progress:
                         lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
                     dist = solver.compute_distance(v)
-                    f['matrix'][:,v] = dist
-                    height   = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
-                    height   = height/height.sum()
-                    sdata[v] = np.sum(data * height)
+                    f['matrix'][:,v] = np.exp(-dist)
+                    filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
+                    filt     = filt/filt.sum()
+                    sdata[v] = np.sum(data * filt)
 
         # Save smoothed data
         lib.io.write_curv(args.outfile, sdata)

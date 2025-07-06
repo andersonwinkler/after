@@ -480,9 +480,61 @@ def dpxdown(dpx, n, vtx=None, fac=None, fsmode=True, pycno=False):
     return dpx
 
 # =============================================================================
+def dpv2dpf_weighted(dpv, fac, wv, wf):
+    '''
+    More general dpv2dpf that can weight by Voronoi areas, angles, or others.
+    '''
+    dpf = dpv[fac] * wf / wv[fac]
+    dpf = dpf.sum(axis=1)
+    return dpf
+
+# =============================================================================
+def dpf2dpv_weighted(dpf, fac, wv, wf):
+    '''
+    More general dpf2dpv that can weight by Voronoi areas, angles, or others.
+    '''
+    dat = dpf[:,None] * wf / wf.sum(axis=1)[:,None]
+    dpv = np.zeros(wv.shape)
+    np.add.at(dpv, fac, dat)
+    return dpv
+    
+# =============================================================================
+def dpv2dpf(dpv, fac, pycno=False):
+    '''
+    Convert vertexwise data to facewise.
+
+    Parameters
+    ----------
+    dpv : NumPy vector
+        Data per vertex to be converted to facewise.
+    fac : NumPy array (num faces by 3)
+        Vertex indices that form each face.
+    pycno : Bool, optional
+        Whether to use a mass-conservative (pycnophylactic) method.
+        If True, preserves the mass; if False, preserves the mean.
+        The default is False.
+
+    Returns
+    -------
+    dpf : NumPy vector
+        Data resampled to facewise.
+    '''
+    nV = dpv.shape[0]
+    if pycno:
+        cnt = np.zeros(nV)
+        np.add.at(cnt, fac.flatten(), 1)
+        dpv = dpv / cnt
+        dpf = dpv[fac]
+        dpf = dpf.sum(axis=1)
+    else:
+        dpf = dpv[fac]
+        dpf = dpf.mean(axis=1)
+    return dpf
+
+# =============================================================================
 def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
     '''
-    Convert facewise to vertexwise.
+    Convert facewise data to vertexwise using the 1/3 rule.
 
     Parameters
     ----------
@@ -496,6 +548,7 @@ def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
         that upward resolution
     pycno : Bool, optional
         Whether to use a mass-conservative (pycnophylactic) method.
+        If True, preserves the mass; if False, preserves the mean.
         The default is False.
     fsmode : Bool, optional
         Assume face indices follow FreeSurfer structure. Only has an effect
@@ -519,8 +572,10 @@ def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
             # Redistribute by a factor of 1/3
             dpv /= 3
             # Scale factor to account for some vertices receiving data from
-            # different number of faces (5 or 6) (not needed unless we assume
-            # all faces have identical size, impossible in practice)
+            # different number of faces (5 or 6) (doesn't assume all faces
+            # have identical sizes)
+            # cnt = np.zeros(nV)
+            # np.add.at(cnt, facflat, 1)
             # s   = np.sum(cnt)/nV/cnt
             # dpv = dpv*s
         else:
@@ -565,8 +620,8 @@ def dpf2dpv(dpf, fac, facu=None, pycno=False, fsmode=True):
             dpv /= 6
             # Scale factor to account for some vertices receiving data from
             # different number of faces (5 or 6)
-            s   = np.sum(cnt)/nVu/cnt
-            dpv = dpv*s
+            #s   = np.sum(cnt)/nVu/cnt
+            #dpv = dpv*s
         else:
             # Average by the number of faces that meet at that vertex
             dpv /= cnt

@@ -341,6 +341,114 @@ def voronoi_area(vtx, fac):
     return vorv, vorf, areaABC
 
 # =============================================================================
+def calc_angles(vtx, fac):
+    '''
+    Compute the angles at each vertex of a face.
+
+    Parameters
+    ----------
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+
+    Returns
+    -------
+    anglesv : NumPy vector, num vertices (float)
+        Sum of angles at each vertex.
+    anglesf : NumPy array, num faces by 3 (float).
+        Angle at each vertex of a face.
+
+    Note that np.sum(angles, axis=1) is the same as pi = 3.14 (180 degrees),
+    whereas anglesv contains the sum of all angles in anglesf for that vertex
+    (referenced by fac). In a plane, this would be 2*pi (360 degrees) but in
+    curved surfaces, that can be a different value.
+    '''
+    tri   = vtx[fac]
+    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
+    L     = np.linalg.norm(edges, axis=2)
+    cos   = (L[:,[1,0,0]]**2 + L[:,[2,2,1]]**2 - L**2) / 2 / L[:,[1,0,0]] / L[:,[2,2,1]]
+    cos   = np.clip(cos, -1.0, 1.0)
+    anglesf = np.arccos(cos)
+    anglesv = np.zeros(vtx.shape[0])
+    np.add.at(anglesv, fac, anglesf)
+    return anglesv, anglesf
+
+# =============================================================================
+def iterative_smoothing(dpv, vtx, fac, FWHM=10):
+    '''
+    Smooth vertexwise data iteratively. The number of iterations
+    is determined automatically based on the mesh resolution and FWHM.
+
+    Parameters
+    ----------
+    dpv : NumPy vector
+        Data per vertex to be smoothed.
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    FWHM : float, optional
+        Full-width at half maximum of the Gaussian kernel.
+        The default is 10.
+
+    Returns
+    -------
+    dpvs : NumPy vector with vertexwise data
+        Smoothed data.
+    '''
+    import scipy as sp
+    
+    # Triangles & their number of vertices
+    tri   = vtx[fac]
+    nV    = dpv.shape
+    
+    # Compute edge lengths, will use the mean as the sigma of each iteration
+    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
+    L     = np.linalg.norm(edges, axis=2) # edge lengths
+    meanL = np.mean(L) # each iteration n will use this as its sigma
+    if FWHM/meanL < 2:
+        raise ValueError('With the resolution of this mesh, the minimum FHWM is {}.'.format(2*meanL))
+    
+    # How many times we should iterate,
+    # Using 2*sigma instead of sigma works empirically. The theoretical
+    # sigma/meanL would work if at each iteration the distances were all the way
+    # through, not interrupted at the end of each edge.
+    sigma = FWHM / np.sqrt(8*np.log(2))
+    niter = int(np.round((2*sigma/meanL)**2))
+    
+    # Here we compute the distance within a face between each vertex and the
+    # other two vertices, and compute the filter height at that distance
+    dist  = {}
+    filt  = {}
+    fsum  = np.zeros(nV) # sum of the filter values around each vertex
+    nfac  = np.zeros(nV) # number of faces that meet at a vertex
+    for fv in range(3):
+        dist[fv] = tri - tri[:,[fv,fv,fv],:]
+        dist[fv] = np.linalg.norm(dist[fv], axis=2)
+        filt[fv] = sp.stats.norm.pdf(dist[fv], loc=0, scale=meanL)
+        np.add.at(fsum, fac[:,fv], np.sum(filt[fv], axis=1))
+        np.add.at(nfac, fac[:,fv], 1)
+    
+    # Let's scale so that for each vertex, the sum of the filter heights is 1
+    for fv in range(3):
+        filt[fv] = filt[fv] / fsum[fac]
+        
+    # This is the smoothing proper, done iteratively
+    for n in range(niter):
+        if n != 0:
+            dpv = dpvs
+        dpvs = np.zeros(nV)
+        for fv in range(3):
+            np.add.at(dpvs, fac[:,fv], np.sum(dpv[fac]*filt[fv], axis=1))
+    
+    # Scale to account for the number of faces that meet at each vertex
+    # For a geodesic sphere based on the icosahedron, 12 vertices are formed
+    # by just 5 faces meeting.
+    dpvs = dpvs / nfac * np.mean(nfac)
+    return dpvs
+
+# =============================================================================
 def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
     Compute curvatures k1 and k2 following the algorithm proposed by
@@ -906,12 +1014,12 @@ def calc_rpw(vtxp, vtxw, fac, relative=False, voronoi=True):
         Vertex indices that define the faces, same for pial and white.
     relative: bool, optional
         Returns not the ratio r=p/w, but instead the ratio (p-w)/(p+w).
+    voronoi: bool, optional
+        Compute Voronoi vertexwise areas, otherwise compute area per face
+        and then convert to vertexwise using the 1/3 rule. Default is True.
 
     Returns
     -------
-    vorrpw : NumPy vector, num vertices
-        Ratio surface area of pial by surface area of white, using
-        the Voronoi areas.
     rpw : NumPy vector, num vertices
         Ratio surface area of pial by surface area of white, using
         the typical method (1/3 of face area given to each vertex).
@@ -979,7 +1087,8 @@ def calc_fsr(vtxp, vtxw, fac, thickness, relative=False):
     return fsr
 
 # =============================================================================
-def geodesic_distances(vtx, fac, method='dijkstra', maxdist=None, maxfwhm=None, iterate_vtx=False):
+def geodesic_distances(vtx, fac, method='dijkstra',
+                       maxdist=None, maxfwhm=None, iterate_vtx=False):
     '''
     Compute geodesic distances in the mesh, all versus all. Returns an
     array vertices by vertices with the distances.

@@ -37,8 +37,8 @@ if __name__ == "__main__":
                         'Anderson M. Winkler / UTRGV / Jul 2025 / https://brainder.org')
     # Options to create distance matrix
     parser.add_argument('--method',
-                        help='Method to compute distances. Can be "mitchell", "crane", or "dijkstra".',
-                        type=str, required=False, default='crane')
+                        help='Method to compute distances. Can be "mitchell", "crane", "dijkstra", or "iterative".',
+                        type=str, required=False, default='iterative')
     parser.add_argument('--surf',
                         help='Surface to compute geodesic distances, each vertex to each other vertex.',
                         type=str, required=False, default=None)
@@ -67,177 +67,207 @@ if __name__ == "__main__":
                         action='store_true', required=False, default=False)
     args = parser.parse_args()
     
-    # Sanity checks
-    create = False
-    apply  = False
-    if args.surf is not None or args.outdist is not None:
-        create = True
-    if args.indist is not None or args.infile is not None:
-        apply = True
-    if args.surf is not None and args.indist is not None:
-        raise ValueError('Error: Cannot use --indist together with --surf or --outdist.')
-    if create and (args.surf is None or args.outdist is None):
-        raise ValueError('Error: If creating a distance matrix, need both --surf and --outdist.')
-    if args.outdist is not None:
-        if not args.outdist.endswith('.h5'):
-            args.outdist = args.outdist + '.h5'
-            
-    # Fork according to the 3 main cases
-    if   create and not apply: # ==============================================
-        # Case 1: Create a distance matrix and save it. Don't smooth any data.
-        
-        # Read surface file
-        vtx, fac, _, _ = lib.io.read_surf(args.surf)
-        nV = vtx.shape[0]
-        
-        # Create empty HDF5 to store the distance matrix
-        create_empty_hdf5(args.outdist, nV, nV, dtype=np.float32)
-        
-        if args.method.lower() in ['mitchell', 'exact', 'mmp']:
-            # Use the method by Mitchell, Mount, and Papadimitriou (1987).
-            # This is exact but very slow for meshes with more than a few hundred vertices.
-            import gdist
-            
-            # Convert to native byte order
-            vtx_native = vtx.astype(np.float64, order='C', copy=True)
-            fac_native = fac.astype(np.int32,   order='C', copy=True)
-            vtx_native = np.ascontiguousarray(vtx_native, dtype=np.float64)
-            fac_native = np.ascontiguousarray(fac_native, dtype=np.int32)
-            
-            # How far to keep computing distances
-            if args.maxfwhm is None:
-                maxdist = np.inf
-            else:
-                maxdist = 4 * args.maxfwhm / np.sqrt(8*np.log(2)) # 4*sigma
-
-            # Open the HDF5 file for writing, then iterate over vertices to
-            # compute the distances and storing
-            with h5py.File(args.outdist, 'r+') as f:
-                start_time = time.time()
-                for v in range(nV):
-                    if args.progress:
-                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                    dist = gdist.compute_gdist(vtx_native, fac_native,
-                                                           max_distance   = maxdist,
-                                                           source_indices = np.array([v],
-                                                           dtype          = np.int32))
-                    f['matrix'][:,v] = np.exp(-dist)
-
-        elif args.method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
-            # Use the method by Crane, Weischedel, and Wardetzky (2013), which
-            # uses heat diffusion for a much faster approximation, that is best for
-            # finely resolved meshes
-            import potpourri3d as pp3d
-            solver = pp3d.MeshHeatMethodDistanceSolver(vtx, fac, t_coef=1.0, use_robust=True)
-            
-            # Open the HDF5 file for writing, then iterate over vertices to
-            # compute the distances and storing
-            with h5py.File(args.outdist, 'r+') as f:
-                start_time = time.time()
-                for v in range(nV):
-                    if args.progress:
-                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                    dist = solver.compute_distance(v)     
-                    f['matrix'][:,v] = np.exp(-dist)   
-
-    elif apply and not create: # ==============================================
-        # Case 2: Apply an existing distance matrix to smooth data.
-        import scipy as sp
-        
-        # Read input data
-        data, _ = lib.io.read_curv(args.infile, is_ascii=False)
-        sigma   = args.fwhm / np.sqrt(8*np.log(2))
-        nV      = data.shape[0]
-        
-        # With the HDF5 file open, smooth each vertex
-        sdata   = np.zeros(data.shape)
-        with h5py.File(args.indist,'r') as f:
-            start_time = time.time()
-            for v in range(nV):
-                if args.progress:
-                    lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                dist     = -np.log(f['matrix'][:,v])
-                filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
-                filt     = filt/filt.sum()
-                sdata[v] = np.sum(data * filt)
-
-        # Save smoothed data
-        lib.io.write_curv(args.outfile, sdata)
-        
-    elif create and apply: # ==================================================
-        # Case 3: Create and apply an existing distance matrix to smooth data.
-        import scipy as sp
-        
-        # Read surface file
-        vtx, fac, _, _ = lib.io.read_surf(args.surf)
-        nV = vtx.shape[0]
-        
-        # Read input data
-        data, _ = lib.io.read_curv(args.infile, is_ascii=False)
-        sigma   = args.fwhm / np.sqrt(8*np.log(2))
-        nV      = data.shape[0]
-        
-        # Create empty HDF5 to store the distance matrix
-        create_empty_hdf5(args.outdist, nV, nV, dtype=np.float32)
-        
-        if args.method.lower() in ['mitchell', 'exact', 'mmp']:
-            # Use the method by Mitchell, Mount, and Papadimitriou (1987).
-            # This is exact but very slow for meshes with more than a few hundred vertices.
-            import gdist
-            
-            # Convert to native byte order
-            vtx_native = vtx.astype(np.float64, order='C', copy=True)
-            fac_native = fac.astype(np.int32,   order='C', copy=True)
-            vtx_native = np.ascontiguousarray(vtx_native, dtype=np.float64)
-            fac_native = np.ascontiguousarray(fac_native, dtype=np.int32)
-            
-            # How far to keep computing distances
-            if args.maxfwhm is None:
-                maxdist = np.inf
-            else:
-                maxdist = 4 * args.maxfwhm / np.sqrt(8*np.log(2)) # 4*sigma
-
-            # Open the HDF5 file for writing, then iterate over vertices to
-            # compute the distances and storing
-            sdata   = np.zeros(data.shape)
-            with h5py.File(args.outdist, 'r+') as f:
-                start_time = time.time()
-                for v in range(nV):
-                    if args.progress:
-                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                    dist = gdist.compute_gdist(vtx_native, fac_native,
-                                               max_distance   = maxdist,
-                                               source_indices = np.array([v],
-                                               dtype          = np.int32))
-                    f['matrix'][:,v] = np.exp(-dist)
-                    filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
-                    filt     = filt/filt.sum()
-                    sdata[v] = np.sum(data * filt)
-
-        elif args.method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
-            # Use the method by Crane, Weischedel, and Wardetzky (2013), which
-            # uses heat diffusion for a much faster approximation, that is best for
-            # finely resolved meshes
-            import potpourri3d as pp3d
-            solver = pp3d.MeshHeatMethodDistanceSolver(vtx, fac, t_coef=1.0, use_robust=True)
-            
-            # Open the HDF5 file for writing, then iterate over vertices to
-            # compute the distances and storing
-            sdata   = np.zeros(data.shape)
-            with h5py.File(args.outdist, 'r+') as f:
-                start_time = time.time()
-                for v in range(nV):
-                    if args.progress:
-                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
-                    dist = solver.compute_distance(v)
-                    f['matrix'][:,v] = np.exp(-dist)
-                    filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
-                    filt     = filt/filt.sum()
-                    sdata[v] = np.sum(data * filt)
-
-        # Save smoothed data
-        lib.io.write_curv(args.outfile, sdata)
+    if args.method.lower() == 'iterative':
     
-    else:
-        parser.print_help()
-        raise ValueError('Nothing to do.')
+        # Sanity checks
+        if args.surf is None:
+            raise ValueError('Error: Must provide a surface with --surf.')
+        if args.infile is None:
+            raise ValueError('Error: Must provide a file to smooth with --in.')
+        if args.indist is not None or args.outdist is not None:
+            raise ValueError('Error: Cannot use --indist  nor --outdist with the iterative method.')
+        if args.indist is not None or args.outdist is not None:
+            raise ValueError('Error: Cannot use --indist  nor --outdist with the iterative method.')
+        if args.out is None:
+            raise ValueError('Error: Need the option --out.')
+            
+        # Read surface file
+        vtx, fac, _, _ = lib.io.read_surf(args.surf)
+        
+        # Read input data
+        data, _ = lib.io.read_curv(args.infile, is_ascii=False)
+        
+        # Smooth
+        sdata = lib.surf.iterative_smoothing(data, vtx, fac, FWHM=args.fwhm)
+        
+        # Save smoothed data
+        lib.io.write_curv(args.outfile, sdata)
+        
+    else: # all other methods
+        
+        # Sanity checks
+        create = False
+        apply  = False
+        if args.surf is not None or args.outdist is not None:
+            create = True
+        if args.indist is not None or args.infile is not None:
+            apply = True
+        if args.surf is not None and args.indist is not None:
+            raise ValueError('Error: Cannot use --indist together with --surf or --outdist.')
+        if create and (args.surf is None or args.outdist is None):
+            raise ValueError('Error: If creating a distance matrix, need both --surf and --outdist.')
+        if apply and args.out is None:
+            raise ValueError('Error: If applying smoothing, need the option --out.')
+        if args.outdist is not None:
+            if not args.outdist.endswith('.h5'):
+                args.outdist = args.outdist + '.h5'
+                
+        # Fork according to the 3 main cases
+        if   create and not apply: # ==============================================
+            # Case 1: Create a distance matrix and save it. Don't smooth any data.
+            
+            # Read surface file
+            vtx, fac, _, _ = lib.io.read_surf(args.surf)
+            nV = vtx.shape[0]
+            
+            # Create empty HDF5 to store the distance matrix
+            create_empty_hdf5(args.outdist, nV, nV, dtype=np.float32)
+            
+            if args.method.lower() in ['mitchell', 'exact', 'mmp']:
+                # Use the method by Mitchell, Mount, and Papadimitriou (1987).
+                # This is exact but very slow for meshes with more than a few hundred vertices.
+                import gdist
+                
+                # Convert to native byte order
+                vtx_native = vtx.astype(np.float64, order='C', copy=True)
+                fac_native = fac.astype(np.int32,   order='C', copy=True)
+                vtx_native = np.ascontiguousarray(vtx_native, dtype=np.float64)
+                fac_native = np.ascontiguousarray(fac_native, dtype=np.int32)
+                
+                # How far to keep computing distances
+                if args.maxfwhm is None:
+                    maxdist = np.inf
+                else:
+                    maxdist = 4 * args.maxfwhm / np.sqrt(8*np.log(2)) # 4*sigma
+    
+                # Open the HDF5 file for writing, then iterate over vertices to
+                # compute the distances and storing
+                with h5py.File(args.outdist, 'r+') as f:
+                    start_time = time.time()
+                    for v in range(nV):
+                        if args.progress:
+                            lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+                        dist = gdist.compute_gdist(vtx_native, fac_native,
+                                                               max_distance   = maxdist,
+                                                               source_indices = np.array([v],
+                                                               dtype          = np.int32))
+                        f['matrix'][:,v] = np.exp(-dist)
+    
+            elif args.method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
+                # Use the method by Crane, Weischedel, and Wardetzky (2013), which
+                # uses heat diffusion for a much faster approximation, that is best for
+                # finely resolved meshes
+                import potpourri3d as pp3d
+                solver = pp3d.MeshHeatMethodDistanceSolver(vtx, fac, t_coef=1.0, use_robust=True)
+                
+                # Open the HDF5 file for writing, then iterate over vertices to
+                # compute the distances and storing
+                with h5py.File(args.outdist, 'r+') as f:
+                    start_time = time.time()
+                    for v in range(nV):
+                        if args.progress:
+                            lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+                        dist = solver.compute_distance(v)     
+                        f['matrix'][:,v] = np.exp(-dist)   
+    
+        elif apply and not create: # ==============================================
+            # Case 2: Apply an existing distance matrix to smooth data.
+            import scipy as sp
+            
+            # Read input data
+            data, _ = lib.io.read_curv(args.infile, is_ascii=False)
+            sigma   = args.fwhm / np.sqrt(8*np.log(2))
+            nV      = data.shape[0]
+            
+            # With the HDF5 file open, smooth each vertex
+            sdata   = np.zeros(data.shape)
+            with h5py.File(args.indist,'r') as f:
+                start_time = time.time()
+                for v in range(nV):
+                    if args.progress:
+                        lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+                    dist     = -np.log(f['matrix'][:,v])
+                    filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
+                    filt     = filt/filt.sum()
+                    sdata[v] = np.sum(data * filt)
+    
+            # Save smoothed data
+            lib.io.write_curv(args.outfile, sdata)
+            
+        elif create and apply: # ==================================================
+            # Case 3: Create and apply an existing distance matrix to smooth data.
+            import scipy as sp
+            
+            # Read surface file
+            vtx, fac, _, _ = lib.io.read_surf(args.surf)
+            nV = vtx.shape[0]
+            
+            # Read input data
+            data, _ = lib.io.read_curv(args.infile, is_ascii=False)
+            sigma   = args.fwhm / np.sqrt(8*np.log(2))
+            nV      = data.shape[0]
+            
+            # Create empty HDF5 to store the distance matrix
+            create_empty_hdf5(args.outdist, nV, nV, dtype=np.float32)
+            
+            if args.method.lower() in ['mitchell', 'exact', 'mmp']:
+                # Use the method by Mitchell, Mount, and Papadimitriou (1987).
+                # This is exact but very slow for meshes with more than a few hundred vertices.
+                import gdist
+                
+                # Convert to native byte order
+                vtx_native = vtx.astype(np.float64, order='C', copy=True)
+                fac_native = fac.astype(np.int32,   order='C', copy=True)
+                vtx_native = np.ascontiguousarray(vtx_native, dtype=np.float64)
+                fac_native = np.ascontiguousarray(fac_native, dtype=np.int32)
+                
+                # How far to keep computing distances
+                if args.maxfwhm is None:
+                    maxdist = np.inf
+                else:
+                    maxdist = 4 * args.maxfwhm / np.sqrt(8*np.log(2)) # 4*sigma
+    
+                # Open the HDF5 file for writing, then iterate over vertices to
+                # compute the distances and storing
+                sdata   = np.zeros(data.shape)
+                with h5py.File(args.outdist, 'r+') as f:
+                    start_time = time.time()
+                    for v in range(nV):
+                        if args.progress:
+                            lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+                        dist = gdist.compute_gdist(vtx_native, fac_native,
+                                                   max_distance   = maxdist,
+                                                   source_indices = np.array([v],
+                                                   dtype          = np.int32))
+                        f['matrix'][:,v] = np.exp(-dist)
+                        filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
+                        filt     = filt/filt.sum()
+                        sdata[v] = np.sum(data * filt)
+    
+            elif args.method.lower() in ['crane', 'fast', 'approximate', 'heat', 'cww']:
+                # Use the method by Crane, Weischedel, and Wardetzky (2013), which
+                # uses heat diffusion for a much faster approximation, that is best for
+                # finely resolved meshes
+                import potpourri3d as pp3d
+                solver = pp3d.MeshHeatMethodDistanceSolver(vtx, fac, t_coef=1.0, use_robust=True)
+                
+                # Open the HDF5 file for writing, then iterate over vertices to
+                # compute the distances and storing
+                sdata   = np.zeros(data.shape)
+                with h5py.File(args.outdist, 'r+') as f:
+                    start_time = time.time()
+                    for v in range(nV):
+                        if args.progress:
+                            lib.utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+                        dist = solver.compute_distance(v)
+                        f['matrix'][:,v] = np.exp(-dist)
+                        filt     = sp.stats.norm.pdf(dist, loc=0, scale=sigma)
+                        filt     = filt/filt.sum()
+                        sdata[v] = np.sum(data * filt)
+    
+            # Save smoothed data
+            lib.io.write_curv(args.outfile, sdata)
+        
+        else:
+            parser.print_help()
+            raise ValueError('Nothing to do.')

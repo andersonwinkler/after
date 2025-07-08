@@ -29,6 +29,25 @@ def create_empty_hdf5(filename, rows, cols, dtype=np.float64):
 
 if __name__ == "__main__":
 
+    # To create distance matrix, need these options:
+    # --surf
+    # --method (mitchell, crane or dijkstra)
+    # --maxfwhm
+    # --outdist
+    #
+    # To smooth data using a distance matrix (mitchell, crane or dijkstra)
+    # --in
+    # --indist (if previously created)
+    # --fwhm
+    # --out
+    #
+    # To smooth data using the basic iterative method
+    # --method iterative
+    # --surf
+    # --in
+    # --fwhm
+    # --out
+
     # Argument parser
     parser = argparse.ArgumentParser(
                         description=\
@@ -55,7 +74,7 @@ if __name__ == "__main__":
     parser.add_argument('--in', dest='infile',
                         help="Path to the file with data to be smoothed.",
                         type=str, required=False, default=None)
-    parser.add_argument('--out', dest='outfile',
+    parser.add_argument('--out', dest='out',
                         help="Path to the file to be created with smoothed data.",
                         type=str, required=False, default=None)
     parser.add_argument('--fwhm', dest='fwhm',
@@ -91,7 +110,7 @@ if __name__ == "__main__":
         sdata = lib.surf.iterative_smoothing(data, vtx, fac, FWHM=args.fwhm)
         
         # Save smoothed data
-        lib.io.write_curv(args.outfile, sdata)
+        lib.io.write_curv(args.out, sdata)
         
     else: # all other methods
         
@@ -266,7 +285,7 @@ if __name__ == "__main__":
                         sdata[v] = np.sum(data * filt)
     
             # Save smoothed data
-            lib.io.write_curv(args.outfile, sdata)
+            lib.io.write_curv(args.out, sdata)
         
         else:
             parser.print_help()

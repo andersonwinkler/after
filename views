@@ -359,10 +359,10 @@ if __name__ == "__main__":
                         help='Subjects directory (usually SUBJECTS_DIR)',
                         type=str, required=False, default=None)
     parser.add_argument('--all',
-                        help='Process all types of measures.',
+                        help='Make views all known types of measures.',
                         action='store_true', required=False, default=False)
     parser.add_argument('--defaults',
-                        help='Make views for the default measures in the "label" and "surf" directories.',
+                        help='Make views for the typical measures in the "label" and "surf" directories.',
                         action='store_true', required=False, default=False)
     parser.add_argument('--curvatures',
                         help='Make views for the curvatures in the "after/curvs" directory',
@@ -384,6 +384,20 @@ if __name__ == "__main__":
                         action='store_true', required=False, default=False)
     args    = parser.parse_args()
     
+    # Pairs of surfaces/measures to construct views of
+    todo = []
+    if args.defaults or args.all:
+        todo.append('defaults')
+    if args.curvatures or args.all:
+        todo.append('curvatures')
+    if args.mantle or args.all:
+        todo.append('mantle')
+    if args.myelin or args.all:
+        todo.append('myelin')
+    if args.lgi or args.all:
+        todo.append('lgi')
+    if len(todo) == 0:
+        raise ValueError('Nothing to do. You must specify what views to make. Check with --help.')
     
     subjdir = args.subjdir
     if args.subjdir is None or args.subjdir == '':
@@ -406,19 +420,6 @@ if __name__ == "__main__":
     # Load locations, colors, and view schemes from a file
     specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'views.json'))
     
-    # Pairs of surfaces/measures to construct views of
-    todo = []
-    if args.defaults or args.all:
-        todo.append('defaults')
-    if args.curvatures or args.all:
-        todo.append('curvatures')
-    if args.mantle or args.all:
-        todo.append('mantle')
-    if args.myelin or args.all:
-        todo.append('myelin')
-    if args.lgi or args.all:
-        todo.append('lgi')
-
     # For each subject
     for subj in subjlist:
         print('Working on {}'.format(os.path.join(subjdir, subj)))

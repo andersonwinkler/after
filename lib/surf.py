@@ -375,7 +375,7 @@ def calc_angles(vtx, fac):
     return anglesv, anglesf
 
 # =============================================================================
-def iterative_smoothing(dpv, vtx, fac, FWHM=10):
+def iterative_smoothing(dpv, vtx, fac, FWHM=10, mask=None):
     '''
     Smooth vertexwise data iteratively. The number of iterations
     is determined automatically based on the mesh resolution and FWHM.
@@ -391,6 +391,9 @@ def iterative_smoothing(dpv, vtx, fac, FWHM=10):
     FWHM : float, optional
         Full-width at half maximum of the Gaussian kernel.
         The default is 10.
+    mask : NumPy vector (optional)
+        Same size as dpv, with 0 for excluded vertices, 1 for included.
+        It can be a fuzzy mask (values [0..1]).
 
     Returns
     -------
@@ -401,8 +404,8 @@ def iterative_smoothing(dpv, vtx, fac, FWHM=10):
     
     # Triangles & their number of vertices
     tri   = vtx[fac]
-    nV    = dpv.shape
-    
+    nV    = dpv.shape[0]
+
     # Compute edge lengths, will use the mean as the sigma of each iteration
     edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
     L     = np.linalg.norm(edges, axis=2) # edge lengths
@@ -427,13 +430,22 @@ def iterative_smoothing(dpv, vtx, fac, FWHM=10):
         dist[fv] = tri - tri[:,[fv,fv,fv],:]
         dist[fv] = np.linalg.norm(dist[fv], axis=2)
         filt[fv] = sp.stats.norm.pdf(dist[fv], loc=0, scale=meanL)
+        if mask is not None:
+            for d in range(3):
+                filt[fv][:,d] =  filt[fv][:,d]*mask[fac[:,fv]]
         np.add.at(fsum, fac[:,fv], np.sum(filt[fv], axis=1))
         np.add.at(nfac, fac[:,fv], 1)
     
     # Let's scale so that for each vertex, the sum of the filter heights is 1
-    for fv in range(3):
-        filt[fv] = filt[fv] / fsum[fac]
-        
+    fsum = fsum[fac]
+    if mask is None:
+        for fv in range(3):
+            filt[fv] = filt[fv] / fsum
+    else:
+        idx = fsum != 0
+        for fv in range(3):
+            filt[fv] = np.divide(filt[fv], fsum, out=np.zeros_like(filt[fv]), where=idx)
+            
     # This is the smoothing proper, done iteratively
     for n in range(niter):
         if n != 0:

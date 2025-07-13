@@ -69,6 +69,7 @@ def write_mgh(fileout, data, affine=None, header=None):
 # =============================================================================
 def read_annot(filein, orig_ids=False):
     labels, ctab, names = nib.freesurfer.io.read_annot(filein, orig_ids=orig_ids)
+    names = [n.decode('utf-8') for n in names]
     return labels, ctab, names
 
 # =============================================================================

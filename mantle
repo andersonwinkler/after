@@ -8,7 +8,7 @@ Created on Fri Mar  7 22:36:30 2025
 
 import os
 import argparse
-
+import numpy as np
 import lib
 
 if __name__ == "__main__":
@@ -46,34 +46,44 @@ if __name__ == "__main__":
     # For each subject and each hemisphere
     for subj in subjlist:
         for h in H:
+            
             # Read input files
-            # Pial surface
             filein = os.path.join(subjdir, subj, 'surf', '{}.pial'.format(h))
             print('Reading pial: {}'.format(filein))
             vtxp, facp, infop, _ = lib.io.read_surf(filein)
             vtxp = vtxp + infop['cras']
-            # White surface
             filein = os.path.join(subjdir, subj, 'surf', '{}.white'.format(h))
             print('Reading white: {}'.format(filein))
             vtxw, facw, infow, _ = lib.io.read_surf(filein)
             vtxw = vtxw + infow['cras']
-            # Cortical thickness (not calculated but loaded from FS)
             filein = os.path.join(subjdir, subj, 'surf', '{}.thickness'.format(h))
             print('Reading cortical thickess: {}'.format(filein))
             thickness = lib.io.read_curv(filein)[0]
+            filein = os.path.join(subjdir, subj, 'label', '{}.aparc.annot'.format(h))
+            print('Reading parcellation labels: {}'.format(filein))
+            labels, ctab, names = lib.io.read_annot(filein)
 
             # Compute ratio pial/white area
             mantle = {}
             print('Computing ratio pial/white area')
             mantle['rpw'] = lib.surf.calc_rpw(vtxp, vtxw, facp, relative=True, voronoi=True)
             
-            # Compute ratio FSR
+            # Compute FSR
             print('Computing the Frustum Surface Ratio')
             mantle['fsr'] = lib.surf.calc_fsr(vtxp, vtxw, facp, thickness, relative=True)
             
             # Compute the distance between white and pial (a kind of thickness)
             print('Computing distance between white and pial')
             mantle['dpw'] = lib.surf.surf_dist(vtxp, vtxw)[0]
+            
+            # Create cortical mask
+            print('Creating cortical mask')
+            toremove = ['unknown', 'corpuscallosum']
+            idxout = [names.index(r) for r in toremove]
+            idxout.append(-1)
+            mantle['mask'] = np.ones(labels.shape)
+            for i in idxout:
+                mantle['mask'][labels == i] = 0
             
             # Save results
             outdir = os.path.join(subjdir, subj, 'after', 'mantle')
@@ -82,4 +92,5 @@ if __name__ == "__main__":
             for m in mantle:
                 fileout = os.path.join(outdir, '{}.{}'.format(h, m))
                 lib.io.write_curv(fileout, mantle[m], vec=None, use_ascii=False)
-    print('Finished computing cortical mantle metrics.')
+
+    print('Finished computing cortical mantle metrics and mask.')

@@ -421,7 +421,8 @@ def dpxdown(dpx, n, vtx=None, fac=None, fsmode=True, pycno=False):
         
     if dtype == 'dpv':
         for _ in range(n):
-            nVnew  = 4**(order-1)*(V0-2)+2
+            nVnew  = int(4**(order-1)*(V0-2)+2)
+            print(nVnew)
             dpxnew = dpx[0:nVnew]
             if pycno:
                 dpxadd = np.zeros(dpxnew.shape)
@@ -430,6 +431,8 @@ def dpxdown(dpx, n, vtx=None, fac=None, fsmode=True, pycno=False):
                 np.add.at(dpxadd, facs[idx,0], dpx[facs[idx,1]])
                 np.add.at(dpxadd, facs[idx,0], dpx[facs[idx,2]])
                 dpx    = dpxnew + dpxadd/4
+            else:
+                dpx = dpxnew
             order -= 1
                 
     elif dtype == 'dpf':

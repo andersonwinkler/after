@@ -506,12 +506,13 @@ if ${DORETESSELLATE} || ${DOALL} ; then
                                 --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
    done
 
-   # Create the retessellated midthickness surface (not a typical FS output but sometimes created by other programs)
+   # Create the retessellated midthickness surface
+   mkdir -p ${SUBJECTS_DIR}/${subj}/after/mantle # also created inside the mantle command
    for h in lh rh ; do
       if [[ -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
          echo ${FREESURFER_HOME}/bin/mris_expand \
                     -thickness ${SUBJECTS_DIR}/${subj}/surf/${h}.white  \
-                     0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
+                     0.5       ${SUBJECTS_DIR}/${subj}/after/mantle/${h}.midthickness
       fi
    done
 fi

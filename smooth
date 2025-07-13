@@ -56,42 +56,106 @@ if __name__ == "__main__":
                         'Smooth data on the surface of a mesh using geodesic distances.',
                         epilog=\
                         'Anderson M. Winkler / UTRGV / Jul 2025 / https://brainder.org')
-    # Options to create distance matrix
     parser.add_argument('--method',
-                        help='Method to compute distances. Can be "mitchell", "crane", "dijkstra", or "iterative".',
-                        type=str, required=False, default='iterative')
+                        help='Method to compute distances. Can be "mitchell", "crane", "dijkstra", "iterative", or "freesurfer".',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subj',
+                        help='Subject (must exist in the SUBJECTS_DIR directory. Needed for "--method freesurfer".',
+                        type=str, required=False, default=None)
     parser.add_argument('--surf',
                         help='Surface to compute geodesic distances, each vertex to each other vertex.',
                         type=str, required=False, default=None)
-    parser.add_argument('--outdist', dest='outdist',
+    parser.add_argument('--outdist',
                         help="Path to the file to store distance matrix (in HDF5 format).",
                         type=str, required=False, default=None)
-    parser.add_argument('--maxfwhm', dest='maxfwhm',
+    parser.add_argument('--maxfwhm',
                         help="Maximum intended FWHM with which the matrix of distances will be used.",
                         type=float, required=False, default=30)
-    # Options to smooth data
-    parser.add_argument('--indist', dest='indist',
+    parser.add_argument('--indist',
                         help="Path to the file with distance matrix stored (in HDF5 format).",
                         type=str, required=False, default=None)
     parser.add_argument('--in', dest='infile',
                         help="Path to the file with data to be smoothed.",
                         type=str, required=False, default=None)
-    parser.add_argument('--out', dest='out',
+    parser.add_argument('--out', dest='outfile',
                         help="Path to the file to be created with smoothed data.",
                         type=str, required=False, default=None)
-    parser.add_argument('--fwhm', dest='fwhm',
+    parser.add_argument('--fwhm',
                         help="FWHM to smooth the data.",
                         type=float, required=False, default=10)
     parser.add_argument('--mask', dest='maskfile',
                         help="Path to the mask file (inclusive mask, can be fuzzy).",
                         type=str, required=False, default=None)
-    # Show a nice progress bar (only use in interactive sessions)
     parser.add_argument('--progress',
                         help='Show a progress bar (avoid in headless systems)',
                         action='store_true', required=False, default=False)
     args = parser.parse_args()
     
-    if args.method.lower() == 'iterative': # basic iterative method
+    # Sanity checks
+    if args.method is None:
+        if args.subj is None:
+            raise ValueError('Error: Must specify a method with "--method".')
+        else:
+            args.method = 'freesurfer'
+        
+    if args.method.lower() in ('freesurfer', 'fs'): # FreeSurfer method, for all known measures
+        import os
+        fshome  = os.getenv('FREESURFER_HOME')
+        subjdir = os.getenv('SUBJECTS_DIR')
+        
+        # Sanity checks
+        if args.subj is None:
+            raise ValueError('Error: With --method freesurfer, a subject must be specified with --subj.')
+        if fshome is None:
+            raise ValueError('Error: Environment variable FREESURFER_HOME has not been set.')
+        if subjdir is None:
+            raise ValueError('Error: Environment variable SUBJECTS_DIR has not been set.')
+        subj = args.subj
+        fwhm = int(np.round(args.fwhm))
+        
+        # Read json file with specs of what we'll smooth
+        specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'specs.json'))
+    
+        # Output directory
+        outdir = os.path.join(subjdir, subj, 'after', 'smooth','fwhm{}'.format(fwhm))
+        os.makedirs(outdir, exist_ok=True)
+        
+        # For each measure we'll smooth
+        for hemi in ('lh', 'rh'):
+            for meas in specs['measures']:
+                
+                # If no surface is specified (e.g., for parcellations), we'll skip
+                if specs['measures'][meas]['smooth'] is None:
+                    continue
+                
+                # For each surface we measured on or want to smooth on
+                for surf in specs['measures'][meas]['smooth']:
+                    measfile = os.path.join(subjdir, subj,
+                                            specs['measures'][meas]['dir'],
+                                            specs['measures'][meas]['file'].format(hemi=hemi, surf=surf, meas=meas))
+                    
+                    # Skip if the measure doesn't exist
+                    if not os.path.exists(measfile):
+                        print(f'Warning: Input file does not exist: {measfile}')
+                        continue
+                    outfile  = os.path.join(subjdir, subj,
+                                            'after', 'smooth', 'fwhm{}'.format(fwhm),
+                                            specs['measures'][meas]['file'].format(hemi=hemi, surf=surf, meas=meas))
+                    
+                    # For w-g.pct.mgh, etc, we want to drop the extension and save as curvature for consistency
+                    for suffix in ('.mgh', '.mgz'):
+                        if outfile.endswith(suffix):
+                            outfile = outfile[:-len(suffix)]
+                            
+                    # Smoothing proper, using FreeSurfer
+                    opts = '--s {subj} --hemi {hemi} --sval {measfile} --surfreg {surf} --fwhm-trg {fwhm} --trg_type curv --cortex --tval {outfile}'
+                    opts = opts.format(subj=subj, hemi=hemi, measfile=measfile, surf=surf, fwhm=fwhm, outfile=outfile)
+                    cmd  = os.path.join(fshome, 'bin', f'mri_surf2surf {opts}')
+                    status = os.system(cmd)
+                    if status != 0:
+                        raise OSError(f'Error: Failed to run {cmd}')
+    
+    elif args.method.lower() == 'iterative': # basic iterative method, not very accurate
     
         # Sanity checks
         if args.surf is None:
@@ -119,7 +183,7 @@ if __name__ == "__main__":
         sdata = lib.surf.iterative_smoothing(data, vtx, fac, FWHM=args.fwhm, mask=mask)
         
         # Save smoothed data
-        lib.io.write_curv(args.out, sdata)
+        lib.io.write_curv(args.outfile, sdata)
         
     else: # all other methods
         
@@ -134,7 +198,7 @@ if __name__ == "__main__":
             raise ValueError('Error: Cannot use --indist together with --surf or --outdist.')
         if create and (args.surf is None or args.outdist is None):
             raise ValueError('Error: If creating a distance matrix, need both --surf and --outdist.')
-        if apply and args.out is None:
+        if apply and args.outfile is None:
             raise ValueError('Error: If applying smoothing, need the option --out.')
         if create and not apply and args.maskfile is None:
             raise ValueError('Error: When only creating a distance matrix, do not provide --mask.')
@@ -316,7 +380,7 @@ if __name__ == "__main__":
                         sdata[v] = np.sum(data * filt)
     
             # Save smoothed data
-            lib.io.write_curv(args.out, sdata)
+            lib.io.write_curv(args.outfile, sdata)
         
         else:
             parser.print_help()

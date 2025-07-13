@@ -418,7 +418,7 @@ if __name__ == "__main__":
         subjlist = args.subj.split(',')
     
     # Load locations, colors, and view schemes from a file
-    specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'views.json'))
+    specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'specs.json'))
     
     # For each subject
     for subj in subjlist:

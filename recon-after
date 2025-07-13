@@ -33,7 +33,8 @@ Options:
   directory does not exist, an attempt will be made to create it. 
 
 --all
-  Do everything.
+  Do everything, and smooths data with FWHM=10, unless a different FWHM is
+  provided with --smooth.
 
 --base
   Process up to surface registration (minimum needed to retessellate).
@@ -80,10 +81,9 @@ Options:
   structures. If --subseg was used, will compute partial volume effects also for
   subsegmented structures.
   
---smooth
-  Compute matrix of geodesic distances between every two vertices in the 
-  white and pial surfaces. Data will not be smoothed, only the distances
-  be pre-calculated.
+--smooth <FWHM>
+  Smooth surface-based data with the specified FWHM in the surfaces as originally
+  measured and as specified in AFTERDIR/etc/specs.json.
 
 --views
   Capture orthogonal views of surfaces and overlays, useful for quick
@@ -94,7 +94,7 @@ Options:
   or headless system, but encouraged in interactive sessions.
 
 Requirements:
-* FreeSurfer must be installed and configured properly.
+* FreeSurfer and FSL must be installed and configured properly.
 
 _____________________________________
 Anderson M. Winkler
@@ -172,6 +172,7 @@ DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
 DOSUBREG=false          # Run substructure segmentations
 DOPVE=false             # Compute partial volume effects
 DOSMOOTH=false          # Compute pairwise distance between vertices
+FWHM=10                 # Default FWHM for smoothing (if --smooth is not specified, but --all is)
 DOVIEWS=false           # Capture views for later inspection
 PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
 
@@ -229,7 +230,8 @@ while [[ ${#} -gt 0 ]] ; do
       ;;
    -smooth|--smooth)
       DOSMOOTH=true
-      shift
+      FWHM="${2}"
+      shift 2
       ;;
    -views|--views)
       DOVIEWS=true
@@ -501,18 +503,17 @@ if ${DORETESSELLATE} || ${DOALL} ; then
 
    # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
    for h in lh rh ; do
-      echo ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
-                                --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
-                                --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
+      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
+                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
+                           --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
    done
 
    # Create the retessellated midthickness surface
-   mkdir -p ${SUBJECTS_DIR}/${subj}/after/mantle # also created inside the mantle command
    for h in lh rh ; do
-      if [[ -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
-         echo ${FREESURFER_HOME}/bin/mris_expand \
+      if [[ ! -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
+         ${FREESURFER_HOME}/bin/mris_expand \
                     -thickness ${SUBJECTS_DIR}/${subj}/surf/${h}.white  \
-                     0.5       ${SUBJECTS_DIR}/${subj}/after/mantle/${h}.midthickness
+                     0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
       fi
    done
 fi
@@ -569,15 +570,8 @@ fi
 
 # =====================================================================
 # Prepare a matrix of geodesic distances for subsequent smoothing
-if ${DOSMOOTH} ; then
-   mkdir -p ${SUBJECTS_DIR}/${subj}/after/smooth
-   for surf in pial white ; do
-      for h in lh rh ; do
-         ${AFTERDIR}/smooth --surf ${SUBJECTS_DIR}/${subj}/surf/${h}.${surf} \
-                            --method crane \
-                            --outdist ${SUBJECTS_DIR}/${subj}/after/smooth/${h}.${surf}.distances.h5
-      done
-   done
+if ${DOSMOOTH} || ${DOALL} ; then
+   ${AFTERDIR}/smooth --method fs --subj ${subj} --fwhm ${FWHM}
 fi
 
 # =====================================================================

@@ -414,50 +414,43 @@ def iterative_smoothing(dpv, vtx, fac, FWHM=10, mask=None):
         raise ValueError('With the resolution of this mesh, the minimum FHWM is {}.'.format(2*meanL))
     
     # How many times we should iterate,
-    # Using 2*sigma instead of sigma works empirically. The theoretical
-    # sigma/meanL would work if at each iteration the distances were all the way
-    # through, not interrupted at the end of each edge.
-    sigma = FWHM / np.sqrt(8*np.log(2))
-    niter = int(np.round((2*sigma/meanL)**2))
+    niter = int(np.ceil((FWHM/meanL*(11/12))**2))
     
     # Here we compute the distance within a face between each vertex and the
     # other two vertices, and compute the filter height at that distance
     dist  = {}
     filt  = {}
     fsum  = np.zeros(nV) # sum of the filter values around each vertex
-    nfac  = np.zeros(nV) # number of faces that meet at a vertex
     for fv in range(3):
         dist[fv] = tri - tri[:,[fv,fv,fv],:]
         dist[fv] = np.linalg.norm(dist[fv], axis=2)
         filt[fv] = sp.stats.norm.pdf(dist[fv], loc=0, scale=meanL)
         if mask is not None:
             for d in range(3):
-                filt[fv][:,d] =  filt[fv][:,d]*mask[fac[:,fv]]
+                filt[fv][:,d] = filt[fv][:,d]*mask[fac[:,fv]]
         np.add.at(fsum, fac[:,fv], np.sum(filt[fv], axis=1))
-        np.add.at(nfac, fac[:,fv], 1)
     
     # Let's scale so that for each vertex, the sum of the filter heights is 1
     fsum = fsum[fac]
     if mask is None:
         for fv in range(3):
-            filt[fv] = filt[fv] / fsum
+            filt[fv] = filt[fv] / fsum[:,fv,None]
     else:
-        idx = fsum != 0
         for fv in range(3):
-            filt[fv] = np.divide(filt[fv], fsum, out=np.zeros_like(filt[fv]), where=idx)
+            filt[fv] = np.divide(filt[fv], fsum[:,fv,None], 
+                                 out   = np.zeros_like(filt[fv]), 
+                                 where = fsum[:,fv,None]!=0)
             
     # This is the smoothing proper, done iteratively
     for n in range(niter):
-        if n != 0:
-            dpv = dpvs
-        dpvs = np.zeros(nV)
+        if n == 0:
+            dpvs = np.zeros(nV)
+        else:
+            dpv  = dpvs.copy()
+            dpvs = np.zeros(nV)
         for fv in range(3):
             np.add.at(dpvs, fac[:,fv], np.sum(dpv[fac]*filt[fv], axis=1))
     
-    # Scale to account for the number of faces that meet at each vertex
-    # For a geodesic sphere based on the icosahedron, 12 vertices are formed
-    # by just 5 faces meeting.
-    dpvs = dpvs / nfac * np.mean(nfac)
     return dpvs
 
 # =============================================================================

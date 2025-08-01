@@ -78,8 +78,8 @@
   },
   "views": {
     "lhlat": {"elevation":   0, "azimuth": -90},
-    "lhmed": {"elevation":   0, "azimuth":  90},
     "rhlat": {"elevation":   0, "azimuth":  90},
+    "lhmed": {"elevation":   0, "azimuth":  90},
     "rhmed": {"elevation":   0, "azimuth": -90},
     "bhsup": {"elevation":  90, "azimuth":   0},
     "bhinf": {"elevation": -90, "azimuth": 180},

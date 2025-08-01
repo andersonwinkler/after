@@ -571,6 +571,12 @@ fi
 # =====================================================================
 # Prepare a matrix of geodesic distances for subsequent smoothing
 if ${DOSMOOTH} || ${DOALL} ; then
+   # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
+   for h in lh rh ; do
+      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
+                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
+                           --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
+   done
    ${AFTERDIR}/smooth --method fs --subj ${subj} --fwhm ${FWHM}
 fi
 

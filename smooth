@@ -115,11 +115,7 @@ if __name__ == "__main__":
         
         # Read json file with specs of what we'll smooth
         specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'specs.json'))
-    
-        # Output directory
-        outdir = os.path.join(subjdir, subj, 'after', 'smooth','fwhm{}'.format(fwhm))
-        os.makedirs(outdir, exist_ok=True)
-        
+
         # For each measure we'll smooth
         for hemi in ('lh', 'rh'):
             for meas in specs['measures']:
@@ -138,9 +134,11 @@ if __name__ == "__main__":
                     if not os.path.exists(measfile):
                         print(f'Warning: Input file does not exist: {measfile}')
                         continue
-                    outfile  = os.path.join(subjdir, subj,
-                                            'after', 'smooth', 'fwhm{}'.format(fwhm),
-                                            specs['measures'][meas]['file'].format(hemi=hemi, surf=surf, meas=meas))
+                    
+                    # Where to store the output
+                    outdir = os.path.join(subjdir, subj, 'after', 'smooth', 'fwhm{}'.format(fwhm), specs['measures'][meas]['dir'].split('/')[-1])
+                    os.makedirs(outdir, exist_ok=True)
+                    outfile  = os.path.join(outdir, specs['measures'][meas]['file'].format(hemi=hemi, surf=surf, meas=meas))
                     
                     # For w-g.pct.mgh, etc, we want to drop the extension and save as curvature for consistency
                     for suffix in ('.mgh', '.mgz'):

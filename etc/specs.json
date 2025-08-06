@@ -1,7 +1,7 @@
 {
   "defaults": {
-    "surf": null,
-    "meas": ["nothing", "aparc.annot", "aparc.a2009s.annot", "aparc.DKTatlas.annot", "area", "thickness", "curv", "sulc", "jacobian_white", "w-g.pct.mgh", "volume"],
+    "surf": [null],
+    "meas": ["nothing", "aparc.annot", "aparc.a2009s.annot", "aparc.DKTatlas.annot", "area", "thickness", "curv", "sulc", "jacobian_white", "volume"],
     "show": ["inflated", "pial", "white"]
   },
   "curvatures": {
@@ -10,12 +10,12 @@
     "show": ["inflated", "pial", "white"]
   },
   "mantle": {
-    "surf": null,
-    "meas": ["rpw", "fsr", "dpw"],
+    "surf": [null],
+    "meas": ["rpw", "fsr", "dpw", "w-g.pct"],
     "show": ["inflated", "pial", "white"]
   },
   "myelin": {
-    "surf": null,
+    "surf": [null],
     "meas": ["gwc", "myelin.f0.1", "myelin.f0.5", "myelin.f0.9", "myelin.rpw"],
     "show": ["inflated", "pial", "white"]
   },
@@ -48,7 +48,7 @@
     "curv":                 {"dir": "surf",         "file": "{hemi}.{meas}",        "dlim": [-0.5, 0.5],   "cmap": "bwr",    "clim": [-0.5, 0.5],   "smooth": ["white"]},
     "sulc":                 {"dir": "surf",         "file": "{hemi}.{meas}",        "dlim": [-20, 20],     "cmap": "bwr",    "clim": [-15, 15],     "smooth": ["white"]},
     "jacobian_white":       {"dir": "surf",         "file": "{hemi}.{meas}",        "dlim": [0, 3],        "cmap": "spring", "clim": [0.4, 2.5],    "smooth": ["white"]},
-    "w-g.pct.mgh":          {"dir": "surf",         "file": "{hemi}.{meas}",        "dlim": [0.1, 40],     "cmap": "spring", "clim": [2, 35],       "smooth": ["white"]},
+    "w-g.pct":              {"dir": "after/mantle", "file": "{hemi}.{meas}",        "dlim": [0.1, 40],     "cmap": "spring", "clim": [2, 35],       "smooth": ["white"]},
     "volume":               {"dir": "surf",         "file": "{hemi}.{meas}",        "dlim": [0.1, 5],      "cmap": "spring", "clim": [0.5, 3.5],    "smooth": ["midthickness"]},
     "k1":                   {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [-2.0, 2.0],   "cmap": "bwr",    "clim": [-1.0, 1.0],   "smooth": ["pial", "white"]},
     "k2":                   {"dir": "after/curvs",  "file": "{hemi}.{surf}.{meas}", "dlim": [-1.0, 1.0],   "cmap": "bwr",    "clim": [-0.75, 0.75], "smooth": ["pial", "white"]},

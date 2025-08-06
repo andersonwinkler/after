@@ -151,6 +151,8 @@ def load_meas(subjdir, sub, surf, meas, specs=None, fwhm=None): # ==============
             dat[h] = np.squeeze(nib.load(measname[h]).get_fdata()) # XXX pending fix
         rgb = None
     elif meas.endswith('annot'):
+        if fwhm == 0 and fwhm is None:
+            return None, None
         for h in ['lh', 'rh']:
             lab, ctab, _ = lib.io.read_annot(measname[h])
             dat[h] = lab2fac(lab, fac[h])
@@ -327,15 +329,16 @@ def plot_hist(dat, cbins, outdir, surf, meas, specs): # ========================
                     dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig_thumb)
         
-def makehtml(htmldir, subjlist, surf, meas, show, specs): # =========================
+def makehtml(htmldir, subjlist, surf, meas, show, specs, fwhm=int(0)): # =============
     '''
     Make HTML file. Variables are as in the other functions.
     '''
-    os.makedirs(os.path.join(htmldir), exist_ok=True)
-    with open(os.path.join(htmldir,'{}_{}_{}.html'.format(surf, meas, show)), 'w', encoding='utf-8') as f:
+    os.makedirs(os.path.join(htmldir, 'fwhm{}'.format(fwhm)), exist_ok=True)
+    with open(os.path.join(htmldir, 'fwhm{}'.format(fwhm), '{}_{}_{}.html'.format(surf, meas, show)), 'w', encoding='utf-8') as f:
         f.write('<html><body bgcolor="#222222"><table>\n')
         for subj in subjlist:
-            viewsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'views'), start=htmldir)
+            viewsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'views', 'fwhm{}'.format(fwhm)),
+                                       start=os.path.join(htmldir, 'fwhm{}'.format(fwhm)))
             f.write('<tr>\n')
             for view in specs['views']:
                 f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
@@ -417,6 +420,9 @@ if __name__ == "__main__":
     if subjdir is None or subjdir == '':
         raise ValueError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
     
+    # If the provided --fwhm is an integer, let's make sure it's of that type
+    fwhm = int(np.round(args.fwhm))
+    
     # Make a list of subjects
     if args.subj is None:
         tmp = glob.glob(subjdir + '/*')
@@ -436,15 +442,15 @@ if __name__ == "__main__":
         
         # For each combination of surfaces and meshes, make an HTML file
         for td in todo:
-            if td in 'makehtml':
+            if td == 'makehtml':
                 continue
             print('Making HTML file with views for {}.'.format(td))
-            if specs[td]['surf'] is None:
-                specs[td]['surf'] = [None]
             for surf in specs[td]['surf']:
                 for meas in specs[td]['meas']:
+                    if fwhm !=0 and meas.endswith('.annot'):
+                        continue
                     for show in specs[td]['show']:
-                        makehtml(args.htmldir, subjlist, surf, meas, show, specs)  
+                        makehtml(args.htmldir, subjlist, surf, meas, show, specs, fwhm)  
     else:
             
         # For each subject
@@ -452,7 +458,7 @@ if __name__ == "__main__":
             print('Making views for {}'.format(os.path.join(subjdir, subj)))
             
             # Where to save
-            outdir = os.path.join(subjdir, subj, 'after', 'views', 'fwhm{}'.format(args.fwhm))
+            outdir = os.path.join(subjdir, subj, 'after', 'views', 'fwhm{}'.format(fwhm))
             os.makedirs(os.path.join(outdir, 'thumbnails'), exist_ok=True)
             
             # Count how many figures we are making for this subject (just to print progress in the screen)
@@ -464,8 +470,6 @@ if __name__ == "__main__":
             # For each surface and measure
             v = 0
             for td in todo:
-                if specs[td]['surf'] is None:
-                    specs[td]['surf'] = [None]
                 for surf in specs[td]['surf']: # for each suface in which it was measured
                     for meas in specs[td]['meas']: # for each measure
                         for show in specs[td]['show']: # for each surface to show
@@ -481,18 +485,35 @@ if __name__ == "__main__":
                                 dat = {}
                                 for h in ['lh', 'rh', 'bh']:
                                     dat[h] = np.zeros(vtx[h].shape)
-                            elif not os.path.exists(os.path.join(subjdir, subj, specs['surfaces'][show]['dir'], specs['surfaces'][show]['file'].format_map({'hemi':'rh', 'surf':show}))):
+                            elif not os.path.exists(os.path.join(subjdir, subj,
+                                                                 specs['surfaces'][show]['dir'],
+                                                                 specs['surfaces'][show]['file'].format_map({'hemi':'rh', 'surf':show}))):
                                 print('- Skipping ({}/{}): {}, {}, {}, {} (missing surface: {})'.format(v, num_views, subj, surf, meas, show,
                                      os.path.join(subjdir, subj, specs['surfaces'][show]['dir'], '?h.{}'.format(show))))
                                 continue
-                            elif not os.path.exists(os.path.join(subjdir, subj, specs['measures'][meas]['dir'], specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))):
-                                print('- Skipping ({}/{}): {}, {}, {}, {} (missing data: {})'.format(v, num_views, subj, surf, meas, show,
-                                     os.path.join(subjdir, subj, specs['measures'][meas]['dir'], '?h.{}.{}'.format(surf, meas))))
+                            elif fwhm == 0 and not os.path.exists(os.path.join(subjdir, subj,
+                                                                               specs['measures'][meas]['dir'],
+                                                                               specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))):
+                                print('- Skipping ({}/{}): {}, {}, {}, {} (missing measurement data: {})'.format(v, num_views, subj, surf, meas, show,
+                                                        os.path.join(subjdir, subj,
+                                                                     specs['measures'][meas]['dir'],
+                                                                     specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))))
+                                continue
+                            elif fwhm != 0 and not os.path.exists(os.path.join(subjdir, subj, 'after', 'smooth', 'fwhm{}'.format(fwhm),
+                                                                               specs['measures'][meas]['dir'].split('/')[-1], 
+                                                                               specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))):
+                                print('- Skipping ({}/{}): {}, {}, {}, {} (missing measurement data: {})'.format(v, num_views, subj, surf, meas, show,
+                                                        os.path.join(subjdir, subj, 'after', 'smooth', 'fwhm{}'.format(fwhm),
+                                                                     specs['measures'][meas]['dir'].split('/')[-1], 
+                                                                     specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))))
                                 continue
                             else:
                                 print('- Working on ({}/{}): {}, {}, {}, {}'.format(v, num_views, subj, surf, meas, show))
                                 vtx, fac = load_surf(subjdir, subj, show, specs)
-                                dat, rgb = load_meas(subjdir, subj, surf, meas, specs, fwhm=args.fwhm)
+                                dat, rgb = load_meas(subjdir, subj, surf, meas, specs, fwhm=fwhm)
+                                if dat is None and rgb is None:
+                                    print('- Skipping it (e.g., fwhm=0 for annot file)')
+                                    continue
                                 if specs['measures'][meas]['cmap'] is None:
                                     specs['measures'][meas]['rgb'] = rgb
                             

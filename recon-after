@@ -569,18 +569,6 @@ if ${DOSUBREG} || ${DOALL} ; then
 fi
 
 # =====================================================================
-# Prepare a matrix of geodesic distances for subsequent smoothing
-if ${DOSMOOTH} || ${DOALL} ; then
-   # Compute distances and vectors indicating the repositioning of the ?h.orig into ?h.white.preaparc
-   for h in lh rh ; do
-      ${AFTERDIR}/surfdist --ref ${SUBJECTS_DIR}/${subj}/surf/${h}.orig \
-                           --mov ${SUBJECTS_DIR}/${subj}/surf/${h}.white.preaparc \
-                           --out ${SUBJECTS_DIR}/${subj}/after/retess/${h}.orig2whitepreaparc
-   done
-   ${AFTERDIR}/smooth --method fs --subj ${subj} --fwhm ${FWHM}
-fi
-
-# =====================================================================
 # Make nice figures and histograms for visual inspection
 if ${DOVIEWS} || ${DOALL} ; then
    OPTS=""
@@ -590,4 +578,24 @@ if ${DOVIEWS} || ${DOALL} ; then
    ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" --defaults ${OPTS}
 fi
 
+# =====================================================================
+# Prepare a matrix of geodesic distances for subsequent smoothing
+if ${DOSMOOTH} || ${DOALL} ; then
 
+   # Create the retessellated midthickness surface if for some reason it wasn't created earlier
+   for h in lh rh ; do
+      if [[ ! -f ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness ]] ; then
+         ${FREESURFER_HOME}/bin/mris_expand \
+                    -thickness ${SUBJECTS_DIR}/${subj}/surf/${h}.white  \
+                     0.5       ${SUBJECTS_DIR}/${subj}/surf/${h}.midthickness
+      fi
+   done
+
+   # Do the smoothing proper
+   ${AFTERDIR}/smooth --method fs --subj ${subj} --fwhm ${FWHM}
+
+   # Make views for the smoothed data
+   if ${DOVIEWS} || ${DOALL} ; then
+      ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}--fwhm ${FWHM}
+   fi
+fi

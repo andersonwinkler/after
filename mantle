@@ -10,6 +10,7 @@ import os
 import argparse
 import numpy as np
 import lib
+import nibabel as nib
 
 if __name__ == "__main__":
 
@@ -46,6 +47,7 @@ if __name__ == "__main__":
     # For each subject and each hemisphere
     for subj in subjlist:
         for h in H:
+            mantle = {}
             
             # Read input files
             filein = os.path.join(subjdir, subj, 'surf', '{}.pial'.format(h))
@@ -62,9 +64,13 @@ if __name__ == "__main__":
             filein = os.path.join(subjdir, subj, 'label', '{}.aparc.annot'.format(h))
             print('Reading parcellation labels: {}'.format(filein))
             labels, ctab, names = lib.io.read_annot(filein)
+            
+            # We want to convert mgh to curv and this is a good opportunity
+            print('Reading w-g.pct.mgh: {}'.format(filein))
+            filein = os.path.join(subjdir, subj, 'surf', '{}.w-g.pct.mgh'.format(h))
+            mantle['w-g.pct'] = np.squeeze(nib.load(filein).get_fdata())
 
             # Compute ratio pial/white area
-            mantle = {}
             print('Computing ratio pial/white area')
             mantle['rpw'] = lib.surf.calc_rpw(vtxp, vtxw, facp, relative=True, voronoi=True)
             
@@ -75,7 +81,7 @@ if __name__ == "__main__":
             # Compute the distance between white and pial (a kind of thickness)
             print('Computing distance between white and pial')
             mantle['dpw'] = lib.surf.surf_dist(vtxp, vtxw)[0]
-            
+
             # Create cortical mask
             print('Creating cortical mask')
             toremove = ['unknown', 'corpuscallosum']

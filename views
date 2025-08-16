@@ -502,7 +502,7 @@ if __name__ == "__main__":
                             elif fwhm != 0 and not os.path.exists(os.path.join(subjdir, subj, 'after', 'smooth', 'fwhm{}'.format(fwhm),
                                                                                specs['measures'][meas]['dir'].split('/')[-1], 
                                                                                specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))):
-                                print('- Skipping ({}/{}): {}, {}, {}, {} (missing measurement data: {})'.format(v, num_views, subj, surf, meas, show,
+                                print('- Skipping ({}/{}): {}, {}, {}, {} (missing smoothed measurement data: {})'.format(v, num_views, subj, surf, meas, show,
                                                         os.path.join(subjdir, subj, 'after', 'smooth', 'fwhm{}'.format(fwhm),
                                                                      specs['measures'][meas]['dir'].split('/')[-1], 
                                                                      specs['measures'][meas]['file'].format_map({'hemi':'rh', 'surf':surf, 'meas':meas}))))

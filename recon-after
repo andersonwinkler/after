@@ -569,13 +569,11 @@ if ${DOSUBREG} || ${DOALL} ; then
 fi
 
 # =====================================================================
-# Make nice figures and histograms for visual inspection
+# Make nice figures and histograms for visual inspection for known data
+# Known data that are missing will be skipped. Views already generated will
+# also be skipped; to regenerate for these, delete the previous files.
 if ${DOVIEWS} || ${DOALL} ; then
-   OPTS=""
-   (${DOCURVATURES}   || ${DOALL}) && OPTS="${OPTS} --curvatures --mantle"
-   (${DOLGI}          || ${DOALL}) && OPTS="${OPTS} --lgi"
-   (${DOMYELIN}       || ${DOALL}) && OPTS="${OPTS} --myelin"
-   ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" --defaults ${OPTS}
+   ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" --all
 fi
 
 # =====================================================================
@@ -594,8 +592,8 @@ if ${DOSMOOTH} || ${DOALL} ; then
    # Do the smoothing proper
    ${AFTERDIR}/smooth --method fs --subj ${subj} --fwhm ${FWHM}
 
-   # Make views for the smoothed data
+   # Make views for the smoothed data (views already made will be skipped)
    if ${DOVIEWS} || ${DOALL} ; then
-      ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}--fwhm ${FWHM}
+      ${AFTERDIR}/views --subj ${subj} --subjdir "${SUBJECTS_DIR}" --all --fwhm ${FWHM}
    fi
 fi

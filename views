@@ -397,7 +397,7 @@ if __name__ == "__main__":
                         action='store_true', required=False, default=False)
     args    = parser.parse_args()
     
-    # Pairs of surfaces/measures to construct views of
+    # Define what views will be created
     todo = []
     if args.defaults or args.all:
         todo.append('defaults')

@@ -76,7 +76,7 @@ Options:
   Run scripts that do subsegmentation of the amygala, thalamus, hippocampus,
   and brain stem.
   
---pve
+--segpve
   Compute measures of partial volume effects of GM, WM, and CSF for subcortical
   structures. If --subseg was used, will compute partial volume effects also for
   subsegmented structures.
@@ -169,8 +169,8 @@ DOREFINE="no"           # How to deal with refining
 DOCURVATURES=false      # Compute the better curvatures and their composites
 DOLGI=false             # Compute the LGI
 DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
-DOSUBREG=false          # Run substructure segmentations
-DOPVE=false             # Compute partial volume effects
+DOSUBSEG=false          # Run substructure segmentations
+DOSEGPVE=false          # Compute partial volume effects
 DOSMOOTH=false          # Compute pairwise distance between vertices
 FWHM=10                 # Default FWHM for smoothing (if --smooth is not specified, but --all is)
 DOVIEWS=false           # Capture views for later inspection
@@ -224,8 +224,12 @@ while [[ ${#} -gt 0 ]] ; do
       DOMYELIN=true
       shift
       ;;
-   -subregions|--subregions)
-      DOSUBREG=true
+   -subregions|--subregions|--subseg|--subsegmentations)
+      DOSUBSEG=true
+      shift
+      ;;
+   -segpve|--segpve)
+      DOSEGPVE=true
       shift
       ;;
    -smooth|--smooth)
@@ -562,10 +566,23 @@ fi
 
 # =====================================================================
 # Do the segmentation of subregions
-if ${DOSUBREG} || ${DOALL} ; then
+if ${DOSUBSEG} || ${DOALL} ; then
    ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" --sd "${SUBJECTS_DIR}" thalamus
    ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" --sd "${SUBJECTS_DIR}" hippo-amygdala
    ${FREESURFER_HOME}/bin/segment_subregions --cross "${subj}" --sd "${SUBJECTS_DIR}" brainstem
+   ${FREESURFER_HOME}/bin/mri_sclimbic_seg --s "${subj}" --sd "${SUBJECTS_DIR}"
+   ${FREESURFER_HOME}/bin/mri_segment_hypothalamic_subunits --s "${subj}" --sd "${SUBJECTS_DIR}"
+fi
+
+# =====================================================================
+# Compute partial volume effects for segmented structures
+if ${DOSEGPVE} || ${DOALL} ; then
+   if ${DOMYELIN} || ${DOALL} ; then
+      OPTS="--myelin"
+   else
+      OPTS=""
+   fi
+   ${AFTERDIR}/segpve --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS} --myelin
 fi
 
 # =====================================================================

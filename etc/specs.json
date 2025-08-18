@@ -93,5 +93,17 @@
     "bhinf": {"elevation": -90, "azimuth": 180},
     "bhant": {"elevation":   0, "azimuth": 180},
     "bhpos": {"elevation":   0, "azimuth":   0}
+  },
+  "segpve": {
+    "aseg":           {"lowres": "mri/aseg.mgz",                                     "highres": null,                                  "stats": ["stats/aseg.stats"],                                               "cols":[   1, 4, 3]},
+    "aparc":          {"lowres": "mri/aparc+aseg.mgz",                               "highres": null,                                  "stats": ["stats/{hemi}.aparc.stats"],                                       "cols":[null, 0, 3]},
+    "aparc.a2009s":   {"lowres": "mri/aparc.a2009s+aseg.mgz",                        "highres": null,                                  "stats": ["stats/{hemi}.aparc.a2009s.stats"],                                "cols":[null, 0, 3]},
+    "aparc.DKTatlas": {"lowres": "mri/aparc.DKTatlas+aseg.mgz",                      "highres": null,                                  "stats": ["stats/{hemi}.aparc.DKTatlas.stats"],                              "cols":[null, 0, 3]},
+    "wmparc":         {"lowres": "mri/wmparc.mgz",                                   "highres": null,                                  "stats": ["stats/wmparc.stats"],                                             "cols":[   1, 4, 3]},
+    "amyg+hippo":     {"lowres": "mri/{hemi}.hippoAmygLabels.FS60.FSvoxelSpace.mgz", "highres": "mri/{hemi}.hippoAmygLabels.FS60.mgz", "stats": ["mri/{hemi}.amygNucVolumes.txt", "mri/{hemi}.hippoSfVolumes.txt"], "cols":[null, 0, 1]},
+    "thal":           {"lowres": "mri/ThalamicNuclei.FSvoxelSpace.mgz",              "highres": "mri/ThalamicNuclei.mgz",              "stats": ["mri/ThalamicNuclei.volumes.txt"],                                 "cols":[null, 0, 1]},
+    "limbic":         {"lowres": "mri/sclimbic.mgz",                                 "highres": null,                                  "stats": ["stats/sclimbic.stats"],                                           "cols":[   1, 4, 3]},
+    "hypothal":       {"lowres": "mri/hypothalamic_subunits_seg.v1.mgz",             "highres": null,                                  "stats": ["mri/hypothalamic_subunits_volumes.v1.csv"],                       "cols":[null, 0, 1]},
+    "brainstem":      {"lowres": "mri/brainstemSsLabels.FSvoxelSpace.mgz",           "highres": "mri/brainstemSsLabels.mgz",           "stats": ["mri/brainstemSsLabels.volumes.txt"],                              "cols":[null, 0, 1]}
   }
 }

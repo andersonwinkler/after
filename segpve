@@ -1,0 +1,267 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Sat Aug 16 21:54:28 2025
+
+@author: winkler
+"""
+
+import argparse
+import numpy as np
+import os
+import pandas as pd
+import warnings
+import glob
+
+import lib
+
+######## MAIN FUNCTION ########################################################
+if __name__ == "__main__":
+    
+    # Argument parser
+    parser = argparse.ArgumentParser(
+                        description=\
+                        'Compute partial volume effects of tissue within each region of a segmentation.',
+                        epilog=\
+                        'Anderson M. Winkler / UTRGV / Aug 2025 / https://brainder.org')
+    parser.add_argument('--subj',
+                        help='List of subjects separated by commas.',
+                        type=str, required=False, default=None)
+    parser.add_argument('--subjdir',
+                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        type=str, required=False, default=None)
+    parser.add_argument('--myelin',
+                        help='Compute also the average myelin (as found in the "after/myelin" directory).',
+                        action='store_true', required=False, default=False)
+    
+    # Parsing proper
+    args      = parser.parse_args()
+    subj      = args.subj
+    subjdir   = args.subjdir
+    domyelin  = args.myelin
+
+    # Find SUBJECTS_DIR
+    if subjdir is None:
+        subjdir = os.getenv('SUBJECTS_DIR')
+    if subjdir == '' or subjdir is None:
+        raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
+    
+    # Location of FreeSurfer and FSL
+    fsldir  = os.getenv('FSLDIR')
+    fshome  = os.getenv('FREESURFER_HOME')
+    
+    # Lookup table
+    print('Loading known tables')
+    lut = pd.read_csv(os.path.join(fshome, 'FreeSurferColorLUT.txt'),
+                      sep=r'\s+', comment='#', header=None)
+    lut.columns = ['Index', 'Name', 'R', 'G', 'B', 'A']
+    lut['Hemi'] = 'ambiguous'
+    lut.loc[lut['Name'].str.lower().str.startswith('left'), 'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.lower().str.startswith('right'),'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.lower().str.endswith('left'),   'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.lower().str.endswith('right'),  'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.lower().str.contains('_left'),  'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.lower().str.contains('_right'), 'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.startswith('ctx-lh-'), 'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.startswith('ctx-rh-'), 'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.startswith('ctx_lh_'), 'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.startswith('ctx_rh_'), 'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.startswith('wm-lh-'), 'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.startswith('wm-rh-'), 'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.startswith('wm_lh_'), 'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.startswith('wm_rh_'), 'Hemi'] = 'rh'
+    lut.loc[lut['Name'].str.startswith('L_'), 'Hemi'] = 'lh'
+    lut.loc[lut['Name'].str.startswith('R_'), 'Hemi'] = 'rh'
+    
+    # Load file with the definitions of what we want to run
+    specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'specs.json'))
+    #specs = lib.io.read_json(os.path.join('/mnt/lus01/home/winkler/APPS/tools/after.git', 'etc', 'specs.json'))
+    
+    # For each segmentation set found in the specs file, load the corresponding
+    # volume statistics, since we don't necessarily want to recompute these
+    volumes = []
+    for seg in specs['segpve']:
+        for sf in specs['segpve'][seg]['stats']:
+            if '{hemi}' in sf:
+                H = ['lh', 'rh']
+            else:
+                H = ['nohemi']
+            for hemi in H:
+                tmp1 = pd.DataFrame(columns=['Source', 'Index', 'Hemi', 'Name', 'VolFS'])
+                tmp1 = tmp1.astype({'Source': str,
+                                    'Index': float,
+                                    'Hemi': str,
+                                    'Name': str,
+                                    'VolFS': float})
+                if sf.endswith('.stats'):
+                    tmp0 = pd.read_csv(os.path.join(subjdir, subj, sf.format_map({'hemi':hemi})),
+                                       sep=r'\s+', comment='#', header=None, index_col=None)
+                elif sf.endswith('.txt'):
+                    tmp0 = pd.read_csv(os.path.join(subjdir, subj, sf.format_map({'hemi':hemi})),
+                                       sep=r'\s+', comment='#', header=None, index_col=None)
+                elif sf.endswith('.csv'):
+                    tmp0 = pd.read_csv(os.path.join(subjdir, subj, sf.format_map({'hemi':hemi})),
+                                       sep=',', comment='#', header=None, index_col=0).T
+                if specs['segpve'][seg]['cols'][0] is not None:
+                    tmp1['Index']  = tmp0.iloc[:,[specs['segpve'][seg]['cols'][0]]].astype(float)
+                if specs['segpve'][seg]['cols'][1] is not None:
+                    tmp1['Name']   = tmp0.iloc[:,[specs['segpve'][seg]['cols'][1]]].astype(str)
+                if specs['segpve'][seg]['cols'][2] is not None:
+                    tmp1['VolFS']  = tmp0.iloc[:,[specs['segpve'][seg]['cols'][2]]].astype(float)
+                tmp1['Source'] = seg
+                tmp1['Hemi']   = hemi
+                tmp1.loc[tmp1['Name'].str.lower().str.startswith('left'),   'Hemi'] = 'lh'
+                tmp1.loc[tmp1['Name'].str.lower().str.startswith('right'),  'Hemi'] = 'rh'
+                tmp1.loc[tmp1['Name'].str.lower().str.endswith('left'),     'Hemi'] = 'lh'
+                tmp1.loc[tmp1['Name'].str.lower().str.endswith('right'),    'Hemi'] = 'rh'
+                tmp1.loc[tmp1['Name'].str.lower().str.startswith('wm-lh-'), 'Hemi'] = 'lh'
+                tmp1.loc[tmp1['Name'].str.lower().str.startswith('wm-rh-'), 'Hemi'] = 'rh'
+                if os.path.basename(sf) in ['{hemi}.aparc.a2009s.stats']:
+                    tmp1['Name'] = f'ctx_{hemi}_' + tmp1['Name']
+                elif os.path.basename(sf) in ['{hemi}.aparc.stats', '{hemi}.aparc.DKTatlas.stats']:
+                    tmp1['Name'] = f'ctx-{hemi}-' + tmp1['Name']
+                elif os.path.basename(sf) in ['{hemi}.hippoSfVolumes.txt']:
+                    tmp1.loc[tmp1['Name'] == 'Hippocampal_tail',    'Name'] = 'HP_tail'
+                    tmp1.loc[tmp1['Name'] == 'hippocampal-fissure', 'Name'] = 'hippocampal_fissure'
+                elif os.path.basename(sf) in ['hypothalamic_subunits_volumes.v1.csv']:
+                    tmp1['Name'] = tmp1['Name'].str.replace(' ', '_').str.replace('-', '_')
+                    tmp1['Name'] = tmp1['Name'].str.replace('left_',  'L_hypothalamus_')
+                    tmp1['Name'] = tmp1['Name'].str.replace('right_', 'R_hypothalamus_')
+                volumes.append(tmp1)
+    volumes = pd.concat(volumes, axis=0)
+    
+    # Let's populate the missing indices using the LUT as reference
+    stats = pd.merge(volumes, lut, on='Name', suffixes=('_stats', '_lut'), how='left')
+    stats['Index_lut'] = stats['Index_lut'].fillna(stats['Index_stats'])
+
+    # Drop structures that have no corresponding index in the LUT. These are all
+    # whole-structures whose volumes can be determined by the sum of their parts.
+    stats = stats.dropna(subset=['Index_lut'])
+    stats['Index_lut'] = stats['Index_lut'].astype(int)
+    
+    # Drop other cols, make multi-level index based on Index and Hemi
+    stats = stats.rename(columns={'Index_lut': 'Index'})
+    stats['Hemi'] = stats['Hemi_stats']
+    stats = stats.set_index(['Source', 'Hemi', 'Index'])
+    stats = stats.drop(columns=['Index_stats', 'R', 'G', 'B', 'A', 'Hemi_lut', 'Hemi_stats'])
+    stats = stats.sort_index() # improves performance
+    
+    # Lets make the "Index" col of LUT and volumes as its index as it will help below
+    lut     = lut.set_index('Index')
+    volumes = volumes.dropna(subset=['Index'])
+    volumes['Index'] = volumes['Index'].astype(int)
+    volumes = volumes.set_index('Index')
+
+    # Where we'll store the outputs
+    outdir = os.path.join(subjdir, subj, 'after', 'segpve')
+    os.makedirs(outdir, exist_ok=True)
+    
+    # Convert .mgz to .nii.gz
+    print('Converting image formats')
+    os.makedirs(os.path.join(outdir, 'fast'), exist_ok=True)
+    opts   = '-it mgz -ot nii'
+    mgz    = os.path.join(subjdir, subj, 'mri', 'brainmask.mgz')
+    nii    = os.path.join(outdir, 'fast', 'brainmask.nii.gz')
+    cmd    = os.path.join(fshome, 'bin', f'mri_convert {opts} {mgz} {nii}')
+    status = os.system(cmd)
+    if status != 0:
+        raise OSError(f'Error: Failed to run {cmd}')
+    
+    # Run FAST to obtain GM, WM, and CSF partitions
+    print('Running FAST')
+    cmd  = os.path.join(fsldir, 'bin', f'fast {nii}')
+    status = os.system(cmd)
+    if status != 0:
+        raise OSError(f'Error: Failed to run {cmd}')
+
+    # Convert each partition back to mgz
+    print('Converting image formats back')
+    opts   = '-it nii -ot mgz'
+    for p in range(3):
+        nii    = os.path.join(outdir, 'fast', f'brainmask_pve_{p}.nii.gz')
+        mgz    = os.path.join(outdir, 'fast', f'brainmask_pve_{p}.mgz')
+        cmd    = os.path.join(fshome, 'bin', f'mri_convert {opts} {nii} {mgz}')
+        status = os.system(cmd)
+        if status != 0:
+            raise OSError(f'Error: Failed to run {cmd}')
+    
+    # Load each of the partitions, after running FAST
+    print('Loading images')
+    fast = {}
+    for p in range(3):
+        key = f'pve_{p}'
+        fast[key], _, _ = lib.io.read_mgh(os.path.join(outdir, 'fast', f'brainmask_pve_{p}.mgz'))
+    if domyelin:
+        myelinfile = os.path.join(outdir, '..', 'myelin', 'myelin_pvc.mgz')
+        if os.path.exists(myelinfile):
+            fast['myelin'], _, _ = lib.io.read_mgh(myelinfile)
+    for key in fast:
+        fast[key] = fast[key].flatten()
+        
+    # Add columns for the vol, pve, and myelin
+    stats['VolDiscrete']  = float('nan')
+    for key in fast:
+        stats[key] = float('nan')
+
+    # Load the segmentation file, check the labels present, and compute the 
+    # partial volume effects for each label
+    print('Computing PVE')
+    warnings.filterwarnings('ignore', category=pd.errors.PerformanceWarning)
+    for seg in specs['segpve']:
+        if '{hemi}' in specs['segpve'][seg]['lowres']:
+            Hf = ['lh', 'rh'] # hemisphere from the file name
+        else:
+            Hf = ['nohemi']
+        for hf in Hf:
+            segfile = os.path.join(subjdir, subj, specs['segpve'][seg]['lowres'].format_map({'hemi':hf}))
+            if not os.path.exists(segfile):
+                print('Skipping {} (file does not exist)'.format(segfile))
+                continue
+            else:
+                print('Working on {}'.format(segfile))
+            aseg, _, _ = lib.io.read_mgh(segfile)
+            aseg = aseg.flatten()
+            for lab in np.unique(aseg).astype(int):
+                
+                # Skip ill-defined labels (left and right cortices and white matter, anterior commissure)
+                if lab in [0, 2, 3, 41, 42, 853]:
+                    continue
+                
+                # Figure out in which hemisphere we are in
+                if lab in lut.index:
+                    if lut.loc[lab,'Hemi'] == 'ambiguous':
+                        hs = hf
+                    else:
+                        hs = lut.loc[lab,'Hemi']
+                elif lab in volumes.index:
+                    hs = volumes.loc[lab,'Hemi']
+                else:
+                    hs = hf
+                    
+                # Keep track of the origin of this label
+                if (seg,hs,lab) in stats.index:
+                    stats.loc[(seg,hs,lab),'labloc'] = 'tables+image'
+                else:
+                    stats.loc[(seg,hs,lab),'labloc'] = 'image'
+                    stats.loc[(seg,hs,lab),'Name']   = lut.loc[lab, 'Name']
+                stats['labloc'] = stats['labloc'].fillna('tables')
+                
+                # Mask for this label
+                mask = aseg == lab
+                nV   = mask.sum()
+                stats.loc[(seg,hs,lab),'VolDiscrete'] = nV
+                
+                # For the 3 partitions, let's compute the average within the mask
+                for key in fast:
+                    stats.loc[(seg,hs,lab),key] = np.sum(mask * fast[key])/nV
+    warnings.resetwarnings()
+    
+    # Save resulting table
+    print('Saving results')
+    stats.to_csv(os.path.join(outdir, 'segpve.csv'), sep=',')
+    
+    # Delete intermediate NIFTI files (but keep the mgz versions)
+    print('Removing intermediate files')
+    for file in glob.glob(os.path.join(outdir, 'fast', '*.nii.gz')):
+        os.remove(file)
+    print('Finished.')

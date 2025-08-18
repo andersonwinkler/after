@@ -172,7 +172,7 @@ DOMYELIN=false          # Compute myelin surrogates from T2 or FLAIR
 DOSUBSEG=false          # Run substructure segmentations
 DOSEGPVE=false          # Compute partial volume effects
 DOSMOOTH=false          # Compute pairwise distance between vertices
-FWHM=10                 # Default FWHM for smoothing (if --smooth is not specified, but --all is)
+FWHM=5                  # Default FWHM for smoothing (if --smooth is not specified, but --all is)
 DOVIEWS=false           # Capture views for later inspection
 PROGRESS=""             # Show a progress bar when retessellating? (avoid using in the cluster)
 
@@ -582,7 +582,7 @@ if ${DOSEGPVE} || ${DOALL} ; then
    else
       OPTS=""
    fi
-   ${AFTERDIR}/segpve --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS} --myelin
+   ${AFTERDIR}/segpve --subj ${subj} --subjdir "${SUBJECTS_DIR}" ${OPTS}
 fi
 
 # =====================================================================

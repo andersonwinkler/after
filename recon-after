@@ -281,14 +281,14 @@ if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] && [[ ! -z "${IN_DIR}" ]] ; then
    exit 1
 fi
 
-# We don't want to overwrite when importing new data
+# We do not want to overwrite when importing new data
 if [[ ! -z "${IN_DIR}" ]] && [[ -d "$(readlink -f "${IN_DIR}")" ]] && [[ -d "${SUBJECTS_DIR}/${subj}" ]] ; then
    echo "Error: Directory already exists: ${SUBJECTS_DIR}/${subj}"
    echo "       Will not import new data with --indir. Delete manually first."
    exit 1
 fi
 
-# We don't want to overwrite in --sdnew (would defeat the purpose)
+# We do not want to overwrite in --sdnew (would defeat the purpose)
 if [[ ! -z "${NEW_SUBJECTS_DIR}" ]] ; then
    NEW_SUBJECTS_DIR=$(readlink -f "${NEW_SUBJECTS_DIR}")
    if [[ -d "${NEW_SUBJECTS_DIR}/${subj}" ]] ; then
@@ -413,16 +413,6 @@ if ${DORETESSELLATE} || ${DOALL} ; then
       echo "- ${SUBJECTS_DIR}/${subj}/after/retess/rh.orig.retess"
       exit 1
    fi
-
-   # Will we import T2 or FLAIR files? If so, decide now based on previously located files, if available
-   if [[ -f ${INPUTS} ]] ; then
-      IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
-      IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
-   else
-      IN_T2W=""
-      IN_FLA=""
-   fi
-   OPTS="${IN_T2W} ${IN_FLA}"
    
    # Decide whether and how we'll refine the pial
    case ${DOREFINE} in
@@ -454,18 +444,27 @@ if ${DORETESSELLATE} || ${DOALL} ; then
          [[ $(grep "bin/recon-all" ${SUBJECTS_DIR}/${subj}/scripts/recon-all.log |grep -- "-FLAIRpial"|wc -l) -gt 0 ]] && FLAIRpial=true
          [[ -f ${SUBJECTS_DIR}/${subj}/surf/lh.pial.FLAIR    ]] && FLAIRpial=true
          [[ -f ${SUBJECTS_DIR}/${subj}/surf/rh.pial.FLAIR    ]] && FLAIRpial=true 
-         if ${T2pial} && ${FLAIRpial} ; then
-            echo "Error: Cannot use both T2 and FLAIR to refine the pial for ${subj}. You have to choose one explicitly."
-            exit 1
-         fi
-         ${T2pial}    && OPTS="${OPTS} -T2pial"
-         ${FLAIRpial} && OPTS="${OPTS} -FLAIRpial"
          ;;
       *)
          echo "Error: Unknown --refine option ${key} for subject ${subj}"
          exit 1
          ;;
    esac
+
+   # Will we import T2 or FLAIR files? If so, decide now based on previously located files, if available
+   if ${T2pial} && ${FLAIRpial} ; then
+      echo "Error: Cannot use both T2 and FLAIR to refine the pial for ${subj}. You have to choose one explicitly."
+      exit 1
+   fi
+   if [[ -f ${INPUTS} ]] ; then
+      IN_T2W=$(head -n 2 ${INPUTS}|tail -n 1)
+      IN_FLA=$(head -n 3 ${INPUTS}|tail -n 1)
+   else
+      IN_T2W=""
+      IN_FLA=""
+   fi
+   ${T2pial}    && OPTS="${IN_T2W} -T2pial"
+   ${FLAIRpial} && OPTS="${IN_FLA} -FLAIRpial"
 
    # Do recon-all, from the point in which ?h.orig is used
    ${FREESURFER_HOME}/bin/recon-all \

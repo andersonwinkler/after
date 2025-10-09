@@ -155,13 +155,22 @@ if __name__ == "__main__":
     # Where we'll store the outputs
     outdir = os.path.join(subjdir, subj, 'after', 'segpve')
     os.makedirs(outdir, exist_ok=True)
+    os.makedirs(os.path.join(outdir, 'fast'), exist_ok=True)
+    
+    # Mask the nu.mgz by brainmask.mgz
+    nu        = os.path.join(subjdir, subj, 'mri', 'nu.mgz')
+    brainmask = os.path.join(subjdir, subj, 'mri', 'brainmask.mgz')
+    nu_masked = os.path.join(outdir, 'fast', 'nu_masked.mgz')
+    cmd    = os.path.join(fshome, 'bin', f'fscalc {brainmask} sign mul {nu} --o {nu_masked}')
+    status = os.system(cmd)
+    if status != 0:
+        raise OSError(f'Error: Failed to run {cmd}')
     
     # Convert .mgz to .nii.gz
     print('Converting image formats')
-    os.makedirs(os.path.join(outdir, 'fast'), exist_ok=True)
     opts   = '-it mgz -ot nii'
-    mgz    = os.path.join(subjdir, subj, 'mri', 'brainmask.mgz')
-    nii    = os.path.join(outdir, 'fast', 'brainmask.nii.gz')
+    mgz    = nu_masked
+    nii    = os.path.join(outdir, 'fast', 'nu_masked.nii.gz')
     cmd    = os.path.join(fshome, 'bin', f'mri_convert {opts} {mgz} {nii}')
     status = os.system(cmd)
     if status != 0:
@@ -178,8 +187,8 @@ if __name__ == "__main__":
     print('Converting image formats back')
     opts   = '-it nii -ot mgz'
     for p in range(3):
-        nii    = os.path.join(outdir, 'fast', f'brainmask_pve_{p}.nii.gz')
-        mgz    = os.path.join(outdir, 'fast', f'brainmask_pve_{p}.mgz')
+        nii    = os.path.join(outdir, 'fast', f'nu_masked_pve_{p}.nii.gz')
+        mgz    = os.path.join(outdir, 'fast', f'nu_masked_pve_{p}.mgz')
         cmd    = os.path.join(fshome, 'bin', f'mri_convert {opts} {nii} {mgz}')
         status = os.system(cmd)
         if status != 0:
@@ -190,7 +199,7 @@ if __name__ == "__main__":
     fast = {}
     for p in range(3):
         key = f'pve_{p}'
-        fast[key], _, _ = lib.io.read_mgh(os.path.join(outdir, 'fast', f'brainmask_pve_{p}.mgz'))
+        fast[key], _, _ = lib.io.read_mgh(os.path.join(outdir, 'fast', f'nu_masked_pve_{p}.mgz'))
     if domyelin:
         myelinfile = os.path.join(outdir, '..', 'myelin', 'myelin_pvc.mgz')
         if os.path.exists(myelinfile):

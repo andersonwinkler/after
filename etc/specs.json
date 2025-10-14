@@ -22,7 +22,7 @@
   "lgi": {
     "surf": ["pial"],
     "meas": ["lgi"],
-    "show": ["pial", "inflated"]
+    "show": ["inflated", "pial", "white"]
   },
   "surfaces": {
     "orig.nofix":     {"dir": "surf", "file": "{hemi}.{surf}"},

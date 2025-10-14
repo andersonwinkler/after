@@ -328,30 +328,73 @@ def plot_hist(dat, cbins, outdir, surf, meas, specs): # ========================
         plt.savefig(os.path.join(outdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h).replace('None_','')),
                     dpi=100, facecolor=bg_color, edgecolor='none')
         plt.close(fig_thumb)
-        
-def makehtml(htmldir, subjlist, surf, meas, show, specs, fwhm=int(0)): # =============
+
+def make_subj_html(htmldir, subjlist, specs, todo, fwhm=int(0)): # ===========
     '''
-    Make HTML file. Variables are as in the other functions.
+    Make HTML file for each subject. Variables are as in the other functions.
     '''
-    os.makedirs(os.path.join(htmldir, 'fwhm{}'.format(fwhm)), exist_ok=True)
-    with open(os.path.join(htmldir, 'fwhm{}'.format(fwhm), '{}_{}_{}.html'.format(surf, meas, show)), 'w', encoding='utf-8') as f:
-        f.write('<html><body bgcolor="#222222"><table>\n')
-        for subj in subjlist:
-            viewsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'views', 'fwhm{}'.format(fwhm)),
-                                       start=os.path.join(htmldir, 'fwhm{}'.format(fwhm)))
-            f.write('<tr>\n')
-            for view in specs['views']:
-                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
-                    os.path.join(viewsdir, '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
-                    os.path.join(viewsdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
-                    '{}, {}, {}, {}, {}'.format(subj, surf, meas, show, view).replace('None,','')))
-            for h in ['lh', 'rh', 'bh']:
-                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
-                    os.path.join(viewsdir, 'hist_{}_{}_{}.png'.format(surf, meas, h)),
-                    os.path.join(viewsdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h).replace('None_','')),
-                    '{}, {}, {}, {}'.format(subj, surf, meas, h).replace('None,','')))
-            f.write('</tr>\n')
-        f.write('</table></body></html>')
+    # For each subject, make an HTML file with everything
+    for subj in subjlist:
+        viewsdir = os.path.join(subjdir, subj, 'after', 'views', 'fwhm{}'.format(fwhm)) # same as outdir from the main function
+        with open(os.path.join(viewsdir, 'index.html'), 'w', encoding='utf-8') as f:
+            f.write('<html><body bgcolor="#222222"><table>\n')
+            for td in todo:
+                if td == 'makehtml':
+                    continue
+                print('Making HTML file with views for subject {}.'.format(subj))
+                for show in specs[td]['show']:
+                    for meas in specs[td]['meas']:
+                        for surf in specs[td]['surf']:
+                            if meas.endswith('.annot') and fwhm !=0:
+                                continue
+                            f.write('<tr>\n')
+                            for view in specs['views']:
+                                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
+                                    '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_',''),
+                                    os.path.join('thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
+                                    '{}, {}, {}, {}, {}'.format(subj, surf, meas, show, view).replace('None,','')))
+                            for h in ['lh', 'rh', 'bh']:
+                                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
+                                    'hist_{}_{}_{}.png'.format(surf, meas, h),
+                                    os.path.join('thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h).replace('None_','')),
+                                    '{}, {}, {}, {}'.format(subj, surf, meas, h).replace('None,','')))
+                            f.write('</tr>\n')
+            f.write('</table></body></html>')
+
+def make_group_html(htmldir, subjlist, specs, todo, fwhm=int(0)): # ===========
+    '''
+    Make group HTML file. Variables are as in the other functions.
+    '''
+    
+    # For each combination of surfaces and meshes, make an HTML file
+    for td in todo:
+        if td == 'makehtml':
+            continue
+        print('Making group HTML file with views for {}.'.format(td))
+        for surf in specs[td]['surf']:
+            for meas in specs[td]['meas']:
+                if meas.endswith('.annot') and fwhm !=0:
+                    continue
+                for show in specs[td]['show']:
+                    os.makedirs(os.path.join(htmldir, 'fwhm{}'.format(fwhm)), exist_ok=True)
+                    with open(os.path.join(htmldir, 'fwhm{}'.format(fwhm), '{}_{}_{}.html'.format(surf, meas, show)), 'w', encoding='utf-8') as f:
+                        f.write('<html><body bgcolor="#222222"><table>\n')
+                        for subj in subjlist:
+                            viewsdir = os.path.relpath(os.path.join(subjdir, subj, 'after', 'views', 'fwhm{}'.format(fwhm)),
+                                                       start=os.path.join(htmldir, 'fwhm{}'.format(fwhm)))
+                            f.write('<tr>\n')
+                            for view in specs['views']:
+                                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
+                                    os.path.join(viewsdir, '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
+                                    os.path.join(viewsdir, 'thumbnails', '{}_{}_{}_{}.png'.format(surf, meas, show, view).replace('None_','')),
+                                    '{}, {}, {}, {}, {}'.format(subj, surf, meas, show, view).replace('None,','')))
+                            for h in ['lh', 'rh', 'bh']:
+                                f.write('<td><a href="{}"><img src="{}" border=0 title="{}"></a></td>\n'.format(
+                                    os.path.join(viewsdir, 'hist_{}_{}_{}.png'.format(surf, meas, h)),
+                                    os.path.join(viewsdir, 'thumbnails', 'hist_{}_{}_{}.png'.format(surf, meas, h).replace('None_','')),
+                                    '{}, {}, {}, {}'.format(subj, surf, meas, h).replace('None,','')))
+                            f.write('</tr>\n')
+                        f.write('</table></body></html>')
 
 ######## MAIN FUNCTION ########################################################
 if __name__ == "__main__":
@@ -414,6 +457,13 @@ if __name__ == "__main__":
     if len(todo) == 0:
         raise ValueError('Nothing to do. You must specify what views to make. Check with --help.')
     
+    # Ensure a consistent ordering in todo, otherwise the images in the subject-specific HTML pages could be inconsistely ordered across runs
+    todonew = []
+    for td in ['defaults', 'curvatures', 'mantle', 'myelin', 'lgi', 'makehtml']:
+        if td in todo:
+            todonew.append(td)
+    todo = todonew
+    
     subjdir = args.subjdir
     if args.subjdir is None or args.subjdir == '':
         subjdir = os.getenv('SUBJECTS_DIR')
@@ -437,23 +487,18 @@ if __name__ == "__main__":
     
     # Load locations, colors, and view schemes from a file
     specs = lib.io.read_json(os.path.join(os.path.dirname(__file__), 'etc', 'specs.json'))
-    
+        
     if 'makehtml' in todo:
         
-        # For each combination of surfaces and meshes, make an HTML file
-        for td in todo:
-            if td == 'makehtml':
-                continue
-            print('Making HTML file with views for {}.'.format(td))
-            for surf in specs[td]['surf']:
-                for meas in specs[td]['meas']:
-                    if fwhm !=0 and meas.endswith('.annot'):
-                        continue
-                    for show in specs[td]['show']:
-                        makehtml(args.htmldir, subjlist, surf, meas, show, specs, fwhm)  
+        # Make HTML page with all figures for each subject
+        make_subj_html(args.htmldir, subjlist, specs, todo, fwhm)
+
+        # For each combination of surfaces and meshes, make an HTML file with all subjects
+        make_group_html(args.htmldir, subjlist, specs, todo, fwhm)
+    
     else:
-            
-        # For each subject
+    
+        # For each subject - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
         for subj in subjlist:
             print('Making views for {}'.format(os.path.join(subjdir, subj)))
             
@@ -548,3 +593,4 @@ if __name__ == "__main__":
                             if not os.path.exists(os.path.join(outdir, 'thumbnails', 'hist_{}_bh.png'.format(meas))):
                                 nbins = 150
                                 plot_hist(dat, nbins, outdir, surf, meas, specs)
+    

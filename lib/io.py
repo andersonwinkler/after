@@ -195,3 +195,36 @@ def read_obj(filein): # =======================================================
         'fn': np.array(fn)   # Face normal indices (refer to vn)
     }
     return obj
+
+# ============================================================================
+def read_nifti(filename, NonSteadyState=0, flat=False):
+    n = nib.load(filename)
+    naff   = n.affine
+    img4d  = n.get_fdata();
+    imgsiz = img4d.shape
+    if flat:
+        if len(imgsiz) == 4:
+            img4d  = img4d[:,:,:,NonSteadyState:]
+            imgsiz = img4d.shape
+            img2d  = np.reshape(img4d, (np.prod(imgsiz[0:3]), imgsiz[-1]), order='F').T
+        else:
+            img2d  = np.reshape(img4d, (np.prod(imgsiz[0:3]), 1), order='F').T
+        return img2d, imgsiz, naff
+    else:
+        return img4d, imgsiz, naff
+
+# -----------------------------------------------------------------------------
+def write_nifti(filename, X, size, affine=None, mask=None, flat=False):
+    if affine is None:
+        affine = np.eye(4)
+    if flat:
+        size = (*size[0:3], X.shape[0])
+        if mask is None or len(mask) == 0:
+            mask = np.ones(X.shape[-1], dtype=bool)
+        img = np.zeros((X.shape[0], len(mask)))
+        img[:, mask] = X
+        img = np.reshape(np.transpose(img), size, order='F')
+        n = nib.Nifti1Image(img, affine)
+    else:
+        n = nib.Nifti1Image(X, affine)
+    nib.save(n, filename)

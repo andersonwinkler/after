@@ -1,0 +1,48 @@
+site_name: "After"
+docs_dir: docs
+
+theme:
+  name: material
+  logo: images/palm_orange.svg
+  favicon: images/favicons/favicon.ico
+  font:
+    text: Roboto
+  palette:
+    # Light mode
+    - scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+extra_css:
+  - custom.css
+
+extra_javascript:
+  - images/favicons/site.webmanifest
+
+nav:
+  - Home: index.md
+
+repo_url: https://github.com/andersonwinkler/after
+extra:
+  author: "Anderson M. Winkler"
+  site_url: https://github.com/andersonwinkler/after
+  description: "After"
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/andersonwinkler/palm
+#    - icon: fontawesome/brands/x-twitter
+#      link: https://x.com/AndersonWinkler
+#    - icon: fontawesome/brands/bluesky
+#      link: https://bsky.app/profile/brainder.org
+    - icon: fontawesome/brands/wordpress
+      link: https://brainder.org

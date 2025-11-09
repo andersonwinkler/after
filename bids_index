@@ -1,0 +1,32 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Fri Nov  7 13:11:32 2025
+
+@author: winkler
+"""
+
+import argparse
+from pathlib import Path
+import bids
+
+
+parser = argparse.ArgumentParser(description="Index a BIDS directory for subsequent faster parsing.")
+
+parser.add_argument('--bids_dir',
+                    type     = Path,
+                    required = True,
+                    help     = 'BIDS directory.')
+parser.add_argument('--bids_db',
+                    type     = Path,
+                    required = True,
+                    help     = 'Output directory to store the index (an SQLite database).')
+args = parser.parse_args()
+bids_dir     = args.bids_dir.resolve()    if args.bids_dir else None
+bids_db      = args.bids_db.resolve()     if args.bids_db  else None
+
+if bids_dir is None:
+    raise ValueError('BIDS directory does not exist: {}'.formaat(bids_dir))
+
+BIDS = bids.BIDSLayout(root = bids_dir)
+BIDS.save(bids_db)

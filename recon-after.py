@@ -25,21 +25,22 @@ import lib
 
 def run_cmd(cmd: List[str],
             check: bool = True,
-            env: Optional[dict] = None) -> subprocess.CompletedProcess:
+            env: Optional[dict] = None,
+            capture_output: bool = True) -> subprocess.CompletedProcess:
     '''Run a command and print it.'''
     print(f'Running: {" ".join(cmd)}')
-    return subprocess.run(cmd, check=check, text=True, capture_output=True, env=env)
+    return subprocess.run(cmd, check=check, text=True, capture_output=capture_output, env=env)
 
-def check_fs_status(subj_dir: Path) -> Tuple[str, Optional[int]]:
+def check_fs_status(sub_dir: Path) -> Tuple[str, Optional[int]]:
     '''Check recon-all status from recon-all-status.log.'''
-    log_file = subj_dir / 'scripts' / 'recon-all-status.log'
+    log_file = sub_dir / 'scripts' / 'recon-all-status.log'
     if not log_file.exists():
-        return 'unknown', None
+        return 'failed', None
 
     with open(log_file, 'r') as f:
         lines = [line.strip() for line in f if line.strip()]
     if not lines:
-        return 'unknown', None
+        return 'failed', None
 
     last_line = lines[-1]
     if 'exited with ERRORS' in last_line:
@@ -47,7 +48,7 @@ def check_fs_status(subj_dir: Path) -> Tuple[str, Optional[int]]:
     elif 'finished without error' in last_line:
         try:
             timestamp_str = last_line.split('at')[-1].strip()
-            timestamp = datetime.strptime(timestamp_str, '%Y-%m-%d %H:%M:%S')
+            timestamp = datetime.strptime(timestamp_str, '%a %b %d %H:%M:%S %Z %Y')
             tdelta = int(datetime.now().timestamp()) - int(timestamp.timestamp())
             return 'success', tdelta
         except Exception:
@@ -167,17 +168,12 @@ parser.add_argument('--segpve',
 parser.add_argument('--smooth',
                     nargs    = '+',
                     type     = float,
-                    metavar  = 'FWHM',
+                    default  = None,
                     help     = 'Smooth with given FWHM.')
 parser.add_argument('--views',
                     action   = 'store_true',
                     help     = 'Capture orthogonal views.')
 
-# Misc
-parser.add_argument('--progress',
-                    action   = 'store_true',
-                    default  = False,
-                    help     = 'Show progress bar.')
 args = parser.parse_args()
 
 # -----------------------------------------------------------------
@@ -200,11 +196,10 @@ do_myelin       = args.myelin       or do_all
 do_subseg       = args.subseg       or do_all
 do_segpve       = args.segpve       or do_all
 do_views        = args.views        or do_all
-progress = '--progress' if args.progress else ''
+do_smooth       = args.smooth is not None or do_all
+fwhm            = args.smooth if args.smooth is not None else [10.0]
 
-do_smooth = args.smooth is not None or do_all
-fwhm = args.smooth if args.smooth is not None else (10.0 if do_all else 5.0)
-
+# FreeSurfer and FSL directories (from the environment)
 fs_home = os.environ.get('FREESURFER_HOME')
 fsl_dir = os.environ.get('FSLDIR')
 
@@ -309,7 +304,7 @@ if inputs['T1w']:
         '-s', sub, '-sd', str(subjects_dir),
         '-autorecon1', '-autorecon2', '-sphere', '-surfreg',
         '-norandomness' ] + t1w_list
-    run_cmd(cmd)
+    #run_cmd(cmd)
 
     status, tdelta = check_fs_status(sub_dir)
     if status != 'success' or (tdelta is not None and tdelta > 10):
@@ -343,10 +338,10 @@ if do_retessellate:
         sub_dir / 'surf' / 'lh.sphere.reg',
         sub_dir / 'surf' / 'rh.sphere.reg' ]
     check_files(filelist, 'retessellation')
-
+    
     cmd = [ str(afterdir / 'retessellate'),
         '--subj', sub, '--srf', 'orig',
-        '--subjdir', str(subjects_dir), progress ]
+        '--subjdir', str(subjects_dir) ]
     run_cmd(cmd)
 
     retess_lh = sub_dir / 'after' / 'retess' / 'lh.orig.retess'
@@ -355,7 +350,7 @@ if do_retessellate:
         sys.exit('Error: Retessellation failed. Missing output files.')
     shutil.copy(retess_lh, sub_dir / 'surf' / 'lh.orig')
     shutil.copy(retess_rh, sub_dir / 'surf' / 'rh.orig')
-
+    
     # Define whether refine the pial
     t2pial = flairpial = False
     if do_refine == 'T2':
@@ -370,7 +365,7 @@ if do_retessellate:
     if t2pial and flairpial:
         sys.exit('Error: Cannot refine with both T2 and FLAIR.')
 
-    opts = ''
+    opts = []
     if t2pial and inputs['T2w']:
         opts = ['-T2', inputs['T2w'][0], '-T2pial']
     if flairpial and inputs['FLAIR']:
@@ -418,7 +413,7 @@ if do_curvatures:
 
     cmd = [ str(afterdir / 'curvatures'),
         '--subj', sub, '--subjdir', str(subjects_dir),
-        '--surf', 'pial,white', progress ]
+        '--surf', 'pial,white' ]
     run_cmd(cmd)
 
     cmd = [str(afterdir / 'mantle'), '--subj', sub, '--subjdir', str(subjects_dir)]
@@ -435,7 +430,8 @@ if do_lgi:
     env['PATH'] = f'{afterdir}:{env.get("PATH", "")}'
     cmd = [ f'{fs_home}/bin/recon-all',
         '-s', sub, '-sd', str(subjects_dir), '-localGI' ]
-    run_cmd(cmd, env=env)
+    print(env['PATH'])
+    run_cmd(cmd, env=env, capture_output=False)
 
 # =================================================================
 # 6. Myelin proxy
@@ -485,14 +481,15 @@ if do_smooth:
                 '0.5', str(mid) ]
             run_cmd(cmd)
 
-    cmd = [ str(afterdir / 'smooth'),
-        '--method', 'fs', '--subj', sub, '--fwhm', str(fwhm) ]
-    run_cmd(cmd)
-
-    if do_views:
-        cmd = [ str(afterdir / 'views'),
-            '--subj', sub, '--subjdir', str(subjects_dir),
-            '--all', '--fwhm', str(fwhm) ]
+    for f in fwhm:
+        cmd = [ str(afterdir / 'smooth'),
+            '--method', 'fs', '--subj', sub, '--fwhm', str(f) ]
         run_cmd(cmd)
+    
+        if do_views:
+            cmd = [ str(afterdir / 'views'),
+                '--subj', sub, '--subjdir', str(subjects_dir),
+                '--all', '--fwhm', str(f) ]
+            run_cmd(cmd)
 
 print('recon-after completed successfully.')

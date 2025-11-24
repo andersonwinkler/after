@@ -304,11 +304,11 @@ if inputs['T1w']:
         '-s', sub, '-sd', str(subjects_dir),
         '-autorecon1', '-autorecon2', '-sphere', '-surfreg',
         '-norandomness' ] + t1w_list
-    #run_cmd(cmd)
+    run_cmd(cmd)
 
     status, tdelta = check_fs_status(sub_dir)
-    if status != 'success' or (tdelta is not None and tdelta > 10):
-        sys.exit('Error: recon-all failed or did not finish recently.')
+    if status != 'success' or tdelta is None or tdelta > 10:
+        sys.exit('Error: First call to recon-all failed or did not finish recently.')
 
 # =================================================================
 # 2. Euler number
@@ -382,9 +382,9 @@ if do_retessellate:
         '-s', sub, '-sd', str(subjects_dir) ] + recon_steps + opts
     run_cmd(cmd)
 
-    status, _ = check_fs_status(sub_dir)
-    if status != 'success':
-        sys.exit('Error: recon-all failed post-retessellation.')
+    status, tdelta = check_fs_status(sub_dir)
+    if status != 'success' or tdelta is None :
+        sys.exit('Error: Second call to recon-all failed (post-retessellation).')
 
     # Distance: orig to white.preaparc
     for hemi in ['lh', 'rh']:

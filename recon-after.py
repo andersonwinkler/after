@@ -115,7 +115,7 @@ parser.add_argument('--bids_db',
 parser.add_argument('--bids_sub',
                     type     = str,
                     default  = None,
-                    help     = 'Subject ID in the input BIDS directory (with the "sub-" prefix).')
+                    help     = 'Subject ID in the input BIDS directory (without the "sub-" prefix).')
 parser.add_argument('--bids_filter',
                     type     = Path,
                     default  = None,
@@ -133,7 +133,7 @@ parser.add_argument('--bids_use_flair',
 parser.add_argument('--sd',
                     type     = Path,
                     default  = None,
-                    help     = 'Subjects directory (overrides $subj_dir).')
+                    help     = 'Subjects directory (overrides $SUBJECTS_DIR).')
 
 # What to do
 parser.add_argument('--all',
@@ -208,14 +208,14 @@ fsl_dir = os.environ.get('FSLDIR')
 # -----------------------------------------------------------------
 
 if not (Path(fs_home) / 'bin' / 'recon-all').exists():
-    sys.exit('Error: FreeSurfer not configured.')
+    raise ValueError('Error: FreeSurfer not configured.')
 
 if not subjects_dir or not subjects_dir.is_dir():
-    sys.exit('Error: SUBJECTS_DIR not set or invalid.')
+    raise ValueError('Error: SUBJECTS_DIR not set or invalid.')
 
 if do_all or do_myelin:
     if not (Path(fsl_dir) / 'bin' / 'fslmaths').exists():
-        sys.exit('Error: FSL not configured.')
+        raise ValueError('Error: FSL not configured.')
         
 if bids_dir is not None:
     if args.t1w is not None or args.t2w is not None or args.flair is not None:
@@ -289,6 +289,9 @@ for key in inputs:
     else:
         print('  None')
 
+if not inputs['T1w']:
+    raise ValueError('No input T1w files identified.')
+
 # Directory of this subject
 sub_dir = subjects_dir / sub
 
@@ -313,7 +316,7 @@ if inputs['T1w']:
 # =================================================================
 # 2. Euler number
 # =================================================================
-(sub_dir / 'after').mkdir(exist_ok=True)
+(sub_dir / 'after').mkdir(exist_ok=True, parents=True)
 for hemi in ['lh', 'rh']:
     orig_nofix = sub_dir / 'surf' / f'{hemi}.orig.nofix'
     euler_out  = sub_dir / 'after' / f'{hemi}.euler.txt'

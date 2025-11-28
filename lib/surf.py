@@ -675,6 +675,10 @@ def calc_composites(curvs):
     
     # Shape Index
     curvs['SI']    = 2*np.arctan((curvs['k1']+curvs['k2'])/(curvs['k1']-curvs['k2']))/np.pi
+    
+    # Extrinsic Curvature Index
+    curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
+    
     return curvs
 
 # =============================================================================

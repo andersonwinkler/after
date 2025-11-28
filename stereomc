@@ -8,10 +8,10 @@ computes the average.
 
 Usage:
 stereomc -i image1.nii.gz -i image2.nii.gz -i ... \\
-         -t target.nii.gz -o outputimage.nii.gz -k
+         -t target.nii.gz -o outputimage.nii.gz -d
 
 Options:
--i <image list> : Input images (at least 2).
+-i <image>      : Input images (at least 2 "-i" must be supplied).
 -t <target>     : Target for registration. It can be one
                   of the inputs or another image.
 -o <output>     : Output image, the average of all.
@@ -22,9 +22,9 @@ Requirements:
 FreeSurfer and FSL must be installed and configured.
 
 Reference:
-Kochunov P et al. Retrospective motion correction 
-protocol for high-resolution anatomical MRI.
-Hum Brain Mapp. 2006 Dec;27(12):957-62.
+* Kochunov P et al. Retrospective motion correction 
+  protocol for high-resolution anatomical MRI.
+  Hum Brain Mapp. 2006 Dec;27(12):957-62.
 
 ________________________________________
 Anderson M. Winkler
@@ -48,7 +48,7 @@ fi
 # Accept inputs
 IMG_LIST=""
 DEBUG=false
-while getopts 'i:t:o:k' OPTION
+while getopts 'i:t:o:d' OPTION
 do
   case ${OPTION} in
     i) IMG_LIST="${IMG_LIST} ${OPTARG}" ;;
@@ -60,6 +60,7 @@ done
 
 # Output directory
 OUTDIR=$(dirname ${OUTPUT})
+mkdir -p ${OUTDIR}
 
 # Print in the inputs in the screen:
 echo "Input images: ${IMG_LIST}"
@@ -75,7 +76,7 @@ fi
 # Skull strip the target
 echo "Skull stripping target ${TARGET}"
 tbase=$(basename $(${FSLDIR}/bin/remove_ext ${TARGET}))
-${FREESURFER_HOME}/bin/mri_synthstrip -in ${TARGET} -o ${OUTDIR}/${tbase}_brain.nii.gz
+${FREESURFER_HOME}/bin/mri_synthstrip -i ${TARGET} -o ${OUTDIR}/${tbase}_target_brain.nii.gz
 
 # Skull stripping and linear alignment of each image to the target
 MC_LIST=""
@@ -84,17 +85,17 @@ for i in ${IMG_LIST} ; do
    
    # Skull stripping
    ibase=$(basename $(${FSLDIR}/bin/remove_ext ${i}))
-   ${FREESURFER_HOME}/bin/mri_synthstrip -in ${i} -o ${OUTDIR}/${ibase}_brain.nii.gz
+   ${FREESURFER_HOME}/bin/mri_synthstrip -i ${i} -o ${OUTDIR}/${ibase}_brain.nii.gz
    
    # Align with FLIRT
    ${FSLDIR}/bin/flirt -in   ${OUTDIR}/${ibase}_brain \
-                       -ref  ${OUTDIR}/${tbase}_brain \
+                       -ref  ${OUTDIR}/${tbase}_target_brain \
                        -out  ${OUTDIR}/${ibase}_brain_aligned \
                        -omat ${OUTDIR}/${ibase}_brain_aligned.mat \
                        -dof 6 \
                        -interp sinc
    ${FSLDIR}/bin/flirt -in   ${i} \
-                       -ref  ${OUTDIR}/${tbase}_brain \
+                       -ref  ${OUTDIR}/${tbase}_target_brain \
                        -out  ${OUTDIR}/${ibase}_aligned \
                        -init ${OUTDIR}/${ibase}_brain_aligned.mat \
                        -interp sinc \
@@ -105,19 +106,21 @@ done
 # Concatenation of the aligned images
 echo "Creating temporary 4D file"
 tmp4dfile="4d_tmp"
-${FSLDIR}/bin/fslmerge -t ${OUTDIR}/4d ${MC_LIST}
+${FSLDIR}/bin/fslmerge -t ${OUTDIR}/${tmp4dfile} ${MC_LIST}
 
 # Average of the aligned images
 echo "Averaging"
-${FSLDIR}/bin/fslmaths ${OUTDIR}/4d -Tmean ${OUTPUT}
+${FSLDIR}/bin/fslmaths ${OUTDIR}/${tmp4dfile} -Tmean ${OUTPUT}
 
-# Either rename or get rid of the .mat files
+# Get rid of the .mat files
 if ! ${DEBUG} ; then
-   rm -rf ${OUTDIR}/${tbase}_brain.nii.gz
+   rm -rf ${OUTDIR}/${tmp4dfile}.*
+   rm -rf ${OUTDIR}/${tbase}_target_brain.*
    for i in ${IMG_LIST} ; do
       ibase=$(basename $(${FSLDIR}/bin/remove_ext ${i}))
       rm -rf ${OUTDIR}/${ibase}_brain.* \
-             ${OUTDIR}/${ibase}_brain_aligned.*
+             ${OUTDIR}/${ibase}_brain_aligned.* \
+             ${OUTDIR}/${ibase}_aligned.*
    done
 fi
 echo "Done!"

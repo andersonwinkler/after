@@ -91,7 +91,7 @@ parser.add_argument('--t1w',
                     nargs    = '+',
                     default  = None,
                     type     = Path,
-                    help     = 'Input T1w files for this subject.')
+                    help     = 'Input T1w files for this subject; more than one can be supplied.')
 parser.add_argument('--t2w',
                     nargs    = '+',
                     type     = Path,
@@ -296,7 +296,7 @@ if not inputs['T1w']:
 sub_dir = subjects_dir / sub
 
 # =================================================================
-# 1. Base recon-all up to surfreg
+# Base recon-all up to surfreg (first call to FreeSurfer)
 # =================================================================
 if inputs['T1w']:
     t1w_list = []
@@ -308,15 +308,27 @@ if inputs['T1w']:
         '-autorecon1', '-autorecon2', '-sphere', '-surfreg',
         '-norandomness' ] + t1w_list
     run_cmd(cmd)
-
     status, tdelta = check_fs_status(sub_dir)
     if status != 'success' or tdelta is None or tdelta > 10:
         sys.exit('Error: First call to recon-all failed or did not finish recently.')
 
 # =================================================================
-# 2. Euler number
+# Average multiple T2w and/or FLAIR
 # =================================================================
 (sub_dir / 'after').mkdir(exist_ok=True, parents=True)
+for mod in ['T2w', 'FLAIR']:
+    if len(inputs[mod]) > 1:
+        cmd = [str(afterdir / 'stereomc')]
+        for img in inputs[mod]:
+            cmd = cmd + ['-i', img]
+        cmd = cmd + ['-t', inputs[mod][0]]
+        cmd = cmd + ['-o', str(sub_dir / 'after' / 'avg' / f'{mod}.nii.gz')]
+        run_cmd(cmd)
+        inputs[mod] = [sub_dir / 'after' / 'avg' / f'{mod}.nii.gz']
+
+# =================================================================
+# Euler number
+# =================================================================
 for hemi in ['lh', 'rh']:
     orig_nofix = sub_dir / 'surf' / f'{hemi}.orig.nofix'
     euler_out  = sub_dir / 'after' / f'{hemi}.euler.txt'
@@ -327,11 +339,31 @@ for hemi in ['lh', 'rh']:
         euler_out.write_text(euler)
 
 # =================================================================
-# 3. Retessellation
+# Define whether refine the pial
+# =================================================================
+t2pial = flairpial = False
+if do_refine == 'T2':
+    t2pial = True
+elif do_refine == 'FLAIR':
+    flairpial = True
+elif do_refine == 'auto':
+    if inputs['T2w']   or (sub_dir / 'mri' / 'T2.mgz'   ).exists() or (sub_dir / 'surf' / 'lh.pial.T2'   ).exists():
+        t2pial = True
+    if inputs['FLAIR'] or (sub_dir / 'mri' / 'FLAIR.mgz').exists() or (sub_dir / 'surf' / 'lh.pial.FLAIR').exists():
+        flairpial = True
+if t2pial and flairpial:
+    sys.exit('Error: Cannot refine with both T2 and FLAIR. You must choose one explicitly.')
+if   t2pial    and inputs['T2w']:
+    refineopts = ['-T2',    inputs['T2w'][0],   '-T2pial']
+elif flairpial and inputs['FLAIR']:
+    refineopts = ['-FLAIR', inputs['FLAIR'][0], '-FLAIRpial']
+else:
+    refineopts = []
+
+# =================================================================
+# Retessellation
 # =================================================================
 if do_retessellate:
-    
-    # Retessellation proper
     filelist = [
         sub_dir / 'mri'  / 'brain.finalsurfs.mgz',
         sub_dir / 'surf' / 'lh.orig',
@@ -353,82 +385,61 @@ if do_retessellate:
         sys.exit('Error: Retessellation failed. Missing output files.')
     shutil.copy(retess_lh, sub_dir / 'surf' / 'lh.orig')
     shutil.copy(retess_rh, sub_dir / 'surf' / 'rh.orig')
-    
-    # Define whether refine the pial
-    t2pial = flairpial = False
-    if do_refine == 'T2':
-        t2pial = True
-    elif do_refine == 'FLAIR':
-        flairpial = True
-    elif do_refine == 'auto':
-        if inputs['T2w']   or (sub_dir / 'mri' / 'T2.mgz'   ).exists() or (sub_dir / 'surf' / 'lh.pial.T2'   ).exists():
-            t2pial = True
-        if inputs['FLAIR'] or (sub_dir / 'mri' / 'FLAIR.mgz').exists() or (sub_dir / 'surf' / 'lh.pial.FLAIR').exists():
-            flairpial = True
-    if t2pial and flairpial:
-        sys.exit('Error: Cannot refine with both T2 and FLAIR.')
-
-    opts = []
-    if t2pial and inputs['T2w']:
-        opts = ['-T2', inputs['T2w'][0], '-T2pial']
-    if flairpial and inputs['FLAIR']:
-        opts = ['-FLAIR', inputs['FLAIR'][0], '-FLAIRpial']
-
-    recon_steps = [
-        '-white-preaparc', '-cortex-label', '-smooth2', '-inflate2',
-        '-curvHK', '-sphere', '-surfreg', '-jacobian_white', '-avgcurv',
-        '-cortparc', '-white', '-pial', '-curvstats', '-cortribbon',
-        '-cortparc2', '-cortparc3', '-pctsurfcon', '-hyporelabel',
-        '-aparc2aseg', '-apas2aseg', '-wmparc', '-parcstats',
-        '-parcstats2', '-parcstats3', '-segstats', '-balabels' ]
-    cmd = [ f'{fs_home}/bin/recon-all',
-        '-s', sub, '-sd', str(subjects_dir) ] + recon_steps + opts
-    run_cmd(cmd)
-
-    status, tdelta = check_fs_status(sub_dir)
-    if status != 'success' or tdelta is None :
-        sys.exit('Error: Second call to recon-all failed (post-retessellation).')
-
-    # Distance: orig to white.preaparc
-    for hemi in ['lh', 'rh']:
-        cmd = [ str(afterdir / 'surfdist'),
-            '--ref', str(sub_dir / 'surf' / f'{hemi}.orig'),
-            '--mov', str(sub_dir / 'surf' / f'{hemi}.white.preaparc'),
-            '--out', str(sub_dir / 'after' / 'retess' / f'{hemi}.orig2whitepreaparc') ]
-        run_cmd(cmd)
-
-    # Midthickness
-    for hemi in ['lh', 'rh']:
-        mid = sub_dir / 'surf' / f'{hemi}.midthickness'
-        if not mid.exists():
-            cmd = [ f'{fs_home}/bin/mris_expand',
-                '-thickness',
-                str(sub_dir / 'surf' / f'{hemi}.white'),
-                '0.5', str(mid) ]
-            run_cmd(cmd)
 
 # =================================================================
-# 4. Curvatures
+# Second recon-all from white-preaparc until the end
+# =================================================================
+recon_steps = [
+    '-white-preaparc', '-cortex-label', '-smooth2', '-inflate2',
+    '-curvHK', '-sphere', '-surfreg', '-jacobian_white', '-avgcurv',
+    '-cortparc', '-white', '-pial', '-curvstats', '-cortribbon',
+    '-cortparc2', '-cortparc3', '-pctsurfcon', '-hyporelabel',
+    '-aparc2aseg', '-apas2aseg', '-wmparc', '-parcstats',
+    '-parcstats2', '-parcstats3', '-segstats', '-balabels' ]
+cmd = [ f'{fs_home}/bin/recon-all',
+    '-s', sub, '-sd', str(subjects_dir) ] + recon_steps + refineopts
+run_cmd(cmd)
+status, tdelta = check_fs_status(sub_dir)
+if status != 'success' or tdelta is None :
+    sys.exit('Error: Second call to recon-all failed.')
+
+# Midthickness
+for hemi in ['lh', 'rh']:
+    mid = sub_dir / 'surf' / f'{hemi}.midthickness'
+    if not mid.exists():
+        cmd = [ f'{fs_home}/bin/mris_expand',
+            '-thickness',
+            str(sub_dir / 'surf' / f'{hemi}.white'),
+            '0.5', str(mid) ]
+        run_cmd(cmd)
+
+# Distance orig to white.preaparc, indicating how much the retessellation caused movements
+for hemi in ['lh', 'rh']:
+    cmd = [ str(afterdir / 'surfdist'),
+        '--ref', str(sub_dir / 'surf' / f'{hemi}.orig'),
+        '--mov', str(sub_dir / 'surf' / f'{hemi}.white.preaparc'),
+        '--out', str(sub_dir / 'after' / 'retess' / f'{hemi}.orig2whitepreaparc') ]
+    run_cmd(cmd)
+
+# =================================================================
+# Curvatures
 # =================================================================
 if do_curvatures:
     filelist = [sub_dir / 'surf' / f'{h}.{s}' for h in ['lh', 'rh'] for s in ['white', 'pial']]
     check_files(filelist, 'curvature computation')
-
     cmd = [ str(afterdir / 'curvatures'),
         '--subj', sub, '--subjdir', str(subjects_dir),
         '--surf', 'pial,white' ]
     run_cmd(cmd)
-
     cmd = [str(afterdir / 'mantle'), '--subj', sub, '--subjdir', str(subjects_dir)]
     run_cmd(cmd)
 
 # =================================================================
-# 5. Local Gyrification Index
+# Local Gyrification Index
 # =================================================================
 if do_lgi:
     filelist = [sub_dir / 'surf' / f'{h}.pial' for h in ['lh', 'rh']]
     check_files(filelist, 'LGI computation')
-
     env = os.environ.copy()
     env['PATH'] = f'{afterdir}:{env.get("PATH", "")}'
     cmd = [ f'{fs_home}/bin/recon-all',
@@ -437,14 +448,14 @@ if do_lgi:
     run_cmd(cmd, env=env, capture_output=False)
 
 # =================================================================
-# 6. Myelin proxy
+# Myelin proxy
 # =================================================================
 if do_myelin:
     cmd = [str(afterdir / 'melina'), '-s', sub, '-c']
     run_cmd(cmd)
 
 # =================================================================
-# 7. Subsegmentation
+# Subsegmentation
 # =================================================================
 if do_subseg:
     for structure in ['thalamus', 'hippo-amygdala', 'brainstem']:
@@ -456,7 +467,7 @@ if do_subseg:
         run_cmd(cmd)
 
 # =================================================================
-# 8. Partial Volume Effects
+# Partial Volume Effects
 # =================================================================
 if do_segpve:
     opts = '--myelin' if (do_myelin) else ''
@@ -465,7 +476,7 @@ if do_segpve:
     run_cmd(cmd)
 
 # =================================================================
-# 9. Views
+# Views
 # =================================================================
 if do_views:
     cmd = [ str(afterdir / 'views'),
@@ -473,7 +484,7 @@ if do_views:
     run_cmd(cmd)
 
 # =================================================================
-# 10. Smoothing
+# Smoothing
 # =================================================================
 if do_smooth:
     for hemi in ['lh', 'rh']:

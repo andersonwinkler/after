@@ -289,9 +289,6 @@ for key in inputs:
     else:
         print('  None')
 
-if not inputs['T1w']:
-    raise ValueError('No input T1w files identified.')
-
 # Directory of this subject
 sub_dir = subjects_dir / sub
 
@@ -311,6 +308,10 @@ if inputs['T1w']:
     status, tdelta = check_fs_status(sub_dir)
     if status != 'success' or tdelta is None or tdelta > 10:
         sys.exit('Error: First call to recon-all failed or did not finish recently.')
+else:
+    status, tdelta = check_fs_status(sub_dir)
+    if status != 'success':
+        sys.exit(f'Error: No prior run of recon-all found for subject {sub}.')
 
 # =================================================================
 # Average multiple T2w and/or FLAIR

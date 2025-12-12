@@ -174,6 +174,10 @@ parser.add_argument('--views',
                     action   = 'store_true',
                     help     = 'Capture orthogonal views.')
 
+parser.add_argument('--ignore_errors',
+                    action   = 'store_true',
+                    help     = 'Ignore recon-all errors and move on.')
+
 args = parser.parse_args()
 
 # -----------------------------------------------------------------
@@ -198,6 +202,7 @@ do_segpve       = args.segpve       or do_all
 do_views        = args.views        or do_all
 do_smooth       = args.smooth is not None or do_all
 fwhm            = args.smooth if args.smooth is not None else [10.0]
+ignore_errors   = args.ignore_errors
 
 # FreeSurfer and FSL directories (from the environment)
 fs_home = os.environ.get('FREESURFER_HOME')
@@ -306,9 +311,10 @@ if inputs['T1w']:
         '-norandomness' ] + t1w_list
     run_cmd(cmd)
     status, tdelta = check_fs_status(sub_dir)
-    if status != 'success' or tdelta is None or tdelta > 10:
-        sys.exit('Error: First call to recon-all failed or did not finish recently.')
-else:
+    if not ignore_errors:
+        if status != 'success' or tdelta is None or tdelta > 10:
+            sys.exit('Error: First call to recon-all failed or did not finish recently.')
+elif not ignore_errors:
     status, tdelta = check_fs_status(sub_dir)
     if status != 'success':
         sys.exit(f'Error: No prior run of recon-all found for subject {sub}.')
@@ -330,14 +336,15 @@ for mod in ['T2w', 'FLAIR']:
 # =================================================================
 # Euler number
 # =================================================================
-for hemi in ['lh', 'rh']:
-    orig_nofix = sub_dir / 'surf' / f'{hemi}.orig.nofix'
-    euler_out  = sub_dir / 'after' / f'{hemi}.euler.txt'
-    cmd = [f'{fs_home}/bin/mris_euler_number', str(orig_nofix)]
-    result = run_cmd(cmd)
-    if result.stdout.strip():
-        euler = result.stdout.strip().split()[-1]
-        euler_out.write_text(euler)
+if do_all:
+    for hemi in ['lh', 'rh']:
+        orig_nofix = sub_dir / 'surf' / f'{hemi}.orig.nofix'
+        euler_out  = sub_dir / 'after' / f'{hemi}.euler.txt'
+        cmd = [f'{fs_home}/bin/mris_euler_number', str(orig_nofix)]
+        result = run_cmd(cmd)
+        if result.stdout.strip():
+            euler = result.stdout.strip().split()[-1]
+            euler_out.write_text(euler)
 
 # =================================================================
 # Define whether refine the pial
@@ -390,37 +397,39 @@ if do_retessellate:
 # =================================================================
 # Second recon-all from white-preaparc until the end
 # =================================================================
-recon_steps = [
-    '-white-preaparc', '-cortex-label', '-smooth2', '-inflate2',
-    '-curvHK', '-sphere', '-surfreg', '-jacobian_white', '-avgcurv',
-    '-cortparc', '-white', '-pial', '-curvstats', '-cortribbon',
-    '-cortparc2', '-cortparc3', '-pctsurfcon', '-hyporelabel',
-    '-aparc2aseg', '-apas2aseg', '-wmparc', '-parcstats',
-    '-parcstats2', '-parcstats3', '-segstats', '-balabels' ]
-cmd = [ f'{fs_home}/bin/recon-all',
-    '-s', sub, '-sd', str(subjects_dir) ] + recon_steps + refineopts
-run_cmd(cmd)
-status, tdelta = check_fs_status(sub_dir)
-if status != 'success' or tdelta is None :
-    sys.exit('Error: Second call to recon-all failed.')
-
-# Midthickness
-for hemi in ['lh', 'rh']:
-    mid = sub_dir / 'surf' / f'{hemi}.midthickness'
-    if not mid.exists():
-        cmd = [ f'{fs_home}/bin/mris_expand',
-            '-thickness',
-            str(sub_dir / 'surf' / f'{hemi}.white'),
-            '0.5', str(mid) ]
-        run_cmd(cmd)
-
-# Distance orig to white.preaparc, indicating how much the retessellation caused movements
-for hemi in ['lh', 'rh']:
-    cmd = [ str(afterdir / 'surfdist'),
-        '--ref', str(sub_dir / 'surf' / f'{hemi}.orig'),
-        '--mov', str(sub_dir / 'surf' / f'{hemi}.white.preaparc'),
-        '--out', str(sub_dir / 'after' / 'retess' / f'{hemi}.orig2whitepreaparc') ]
+if do_retessellate or do_all:
+    recon_steps = [
+        '-white-preaparc', '-cortex-label', '-smooth2', '-inflate2',
+        '-curvHK', '-sphere', '-surfreg', '-jacobian_white', '-avgcurv',
+        '-cortparc', '-white', '-pial', '-curvstats', '-cortribbon',
+        '-cortparc2', '-cortparc3', '-pctsurfcon', '-hyporelabel',
+        '-aparc2aseg', '-apas2aseg', '-wmparc', '-parcstats',
+        '-parcstats2', '-parcstats3', '-segstats', '-balabels' ]
+    cmd = [ f'{fs_home}/bin/recon-all',
+        '-s', sub, '-sd', str(subjects_dir) ] + recon_steps + refineopts
     run_cmd(cmd)
+    if not ignore_errors:
+        status, tdelta = check_fs_status(sub_dir)
+        if status != 'success' or tdelta is None :
+            sys.exit('Error: Second call to recon-all failed.')
+    
+    # Midthickness
+    for hemi in ['lh', 'rh']:
+        mid = sub_dir / 'surf' / f'{hemi}.midthickness'
+        if not mid.exists():
+            cmd = [ f'{fs_home}/bin/mris_expand',
+                '-thickness',
+                str(sub_dir / 'surf' / f'{hemi}.white'),
+                '0.5', str(mid) ]
+            run_cmd(cmd)
+    
+    # Distance orig to white.preaparc, indicating how much the retessellation caused movements
+    for hemi in ['lh', 'rh']:
+        cmd = [ str(afterdir / 'surfdist'),
+            '--ref', str(sub_dir / 'surf' / f'{hemi}.orig'),
+            '--mov', str(sub_dir / 'surf' / f'{hemi}.white.preaparc'),
+            '--out', str(sub_dir / 'after' / 'retess' / f'{hemi}.orig2whitepreaparc') ]
+        run_cmd(cmd)
 
 # =================================================================
 # Curvatures
@@ -447,6 +456,7 @@ if do_lgi:
         '-s', sub, '-sd', str(subjects_dir), '-localGI' ]
     print(env['PATH'])
     run_cmd(cmd, env=env, capture_output=False)
+    #run_cmd(['which','getmatlab'], env=env, capture_output=False)
 
 # =================================================================
 # Myelin proxy

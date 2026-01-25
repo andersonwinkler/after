@@ -46,6 +46,10 @@ if __name__ == "__main__":
     parser.add_argument('--ot', dest='outtype',
                         help="Output type (file format)",
                         type=str, required=False, default='curv')
+    # Normalize by the overall mesh surface area?
+    parser.add_argument('--normalize',
+                        help='Normalize curvature by sqrt(area)',
+                        action='store_true', required=False, default=False)
     # Show a nice progress bar (only use in interactive sessions)
     parser.add_argument('--progress',
                         help='Show a progress bar (avoid in headless systems)',
@@ -60,6 +64,7 @@ if __name__ == "__main__":
     intype    = args.intype.lower()
     outprefix = args.outprefix
     outtype   = args.outtype.lower()
+    normalize = args.normalize
     progress  = args.progress
     
     # Check whether we are using a default FS subject structure, or isolated, custom files
@@ -122,19 +127,32 @@ if __name__ == "__main__":
                 print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')
                 curvs = lib.surf.calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
                 
+                # Include Voronoi areas in the set, so it's easier to save
+                curvs['voronoi_area'] = vorv
+                
+                # Normalize by sqrt(area). This is not recommeded if later the
+                # vertexwise data is subjected to group-level analyses. Instead is
+                # is better to include the corresponding global measure as a covariate.
+                if normalize:
+                    area = np.sum(vorv)
+                    curvs['k1'] = curvs['k1']*np.sqrt(area)
+                    curvs['k2'] = curvs['k2']*np.sqrt(area)
+                    
                 # Compute composite measures based on k1 and k2
                 print('Computing composite curvatures from the principal curvatures')
                 curvs = lib.surf.calc_composites(curvs)
                 
-                # Include Voronoi areas in the set, so it's easier to save
-                curvs['voronoi_area'] = vorv
+                # Compute global curvatures
+                print('Computing global curvature indices')                
+                gcurvs = lib.surf.calc_globals(vtx, fac, curvs)
                 
                 # Compute the fractal dimension. Results will be for
                 # one level of resolution down, facewise
                 print('Computing facewise fractal dimension using an inhouse algorithm')
                 FD = lib.surf.calc_fd(vtx, fac, fsmode=True)
                 
-                # Upsample just slightly to vertexwise in the resolution of the original mesh
+                # Upsample FD just slightly from facewise to vertexwise, to be
+                # in the resolution of the original mesh
                 print('Converting facewise fractal dimension to vertexwise')
                 _, facd = lib.platonic.icodown(vtx, fac, 1)
                 curvs['FD'] = lib.platonic.dpf2dpv(FD, facd, facu=fac, pycno=False, fsmode=True)

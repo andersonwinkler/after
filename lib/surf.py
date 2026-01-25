@@ -624,11 +624,28 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
 
 # =============================================================================
 def calc_composites(curvs):
+    '''
+    Compute composite measures of curvature.
+    For normalized indices, divide 'k1' and 'k2' inside curvs
+    by the square root of the total mesh surface area.
+
+    Parameters
+    ----------
+    curvs : dict
+        Dictionary containing keys 'k1' and 'k2', with 
+        the vertexwise curvatures as NumPy vectors.
+
+    Returns
+    -------
+    curvs : dict
+        Returns back the dictionary, now with additional keys
+        containing the various composite curvature indices.
+    '''
     
     # Gaussian curvature
     curvs['K']     = curvs['k1']*curvs['k2']
 
-    # Mean curvature
+    # Mean curvature, aka Germaine curvature
     curvs['H']     = (curvs['k1']+curvs['k2'])/2
 
     # Gaussian-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -644,7 +661,7 @@ def calc_composites(curvs):
     curvs['FICI']  = (curvs['K'] > 0).astype(float)
     curvs['FNICI'] = (curvs['K'] < 0).astype(float)
     
-    # SK2SK
+    # SK2SK (at the vertex level, identical to AICI)
     curvs['SK2SK'] = curvs['GLN'] / curvs['AICI']
     
     # Mean-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
@@ -660,7 +677,7 @@ def calc_composites(curvs):
     curvs['FMCI']  = (curvs['H'] > 0).astype(float)
     curvs['FNMCI'] = (curvs['H'] < 0).astype(float)
     
-    # SH2SH
+    # SH2SH (at the vertex level, identical to AMCI)
     curvs['SH2SH'] = curvs['MLN'] / curvs['AMCI']
     
     # Mixed:  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
@@ -670,7 +687,7 @@ def calc_composites(curvs):
     # Folding Index
     curvs['FI']    = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
     
-    # Curvedness Index
+    # Curvedness Index, aka Casorati curvature
     curvs['CI']    = np.sqrt(curvs['k1']**2 + curvs['k2']**2)/np.sqrt(2)
     
     # Shape Index
@@ -679,7 +696,38 @@ def calc_composites(curvs):
     # Extrinsic Curvature Index
     curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
     
+    # Willmore Energy, aka Bending Energy
+    curvs['W']     = (curvs['H']**2 - curvs['K'])*curvs['voronoi_area']
     return curvs
+
+# =============================================================================
+def calc_globals(vtx, fac, curvs):
+
+    # Global volume and area
+    gcurvs = {}
+    gcurvs['area']   = np.sum(curvs['voronoi_area'])
+    gcurvs['volume'] = calc_full_volume(vtx, fac)
+    
+    # Isoperimetric Ratio (IPR), aka Isoperimetric Index or Roundness
+    gcurvs['IPR']    = gcurvs['area']/(36*np.pi*gcurvs['volume']**2)**(1/3)
+    
+    # Isomorphy Shape Factor (ISF)
+    gcurvs['ISF']    = gcurvs['area']**(3/2)/gcurvs['volume']
+    
+    # Gaussian curvature. By the Gauss-Bonnet theorem, this should be a constant
+    # equal to 2*pi*EC, where EC is the Euler characteristic
+    gcurvs['K']      = np.sum(curvs['K'])
+    
+    # Willmore energy, aka Total Bending Energy
+    # If we subtract gcurvs['K'], a sphere will have W = 0
+    gcurvs['W']      = np.sum(curvs['H']**2) - gcurvs['K']
+    
+    # Gyrification Index (GI) or Convexity Ratio (CR)
+    from scipy.spatial import ConvexHull
+    ch = ConvexHull(vtx)
+    gcurvs['GI']     = gcurvs['area']/ch.area
+    
+    return gcurvs
 
 # =============================================================================
 def avg_edge_len_per_face(tri):
@@ -997,6 +1045,29 @@ def calc_volume(vtxp, vtxw, fac, method='analytical',
         # Volume, vertexwise
         volv = thickness*(areavp + areavw + np.sqrt(areavp*areavw))
     return volv
+
+# =============================================================================
+def calc_full_volume(vtx, fac):
+    '''
+    Compute the volume the interior of the mesh. All normals
+    must have consistently oriented normals.
+
+    Parameters
+    ----------
+    vtxp : NumPy array, num vertices by 3
+        Vertex coordinates of mesj.
+    fac : NumPy array, num faces by 3
+        Vertex indices that define the faces.
+
+    Returns
+    -------
+    vol : Float
+        Volume.
+    '''
+    tri = vtx[fac]
+    det = np.linalg.det(tri)
+    vol = np.abs(np.sum(det))/6.0
+    return vol
 
 # =============================================================================
 def calc_rpw(vtxp, vtxw, fac, relative=False, voronoi=True):

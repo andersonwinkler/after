@@ -90,6 +90,33 @@ def normal2zaxis(n):
     return rot
 
 # =============================================================================
+def calc_EC(vtx,fac):
+    '''
+    Compute the Euler Characteristic of the mesh, EC = V-E+F.
+    For the more general topological definition (EC=V-E+F-P), in this
+    function you need to subtract P manually from the result.
+
+    Parameters
+    ----------
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+
+    Returns
+    -------
+    EC : float
+        Euler characteristic.
+    '''
+    tri = vtx[fac]
+    edg = tri[:,[2,0,1],:] - tri[:,[1,2,0],:] # a=C-B, b=A-C, c=B-A
+    nV  = vtx.shape[0]
+    nE  = edg.shape[0]
+    nF  = fac.shape[0]
+    EC  = nV - nE + nF
+    return EC
+
+# =============================================================================
 def calc_normals(vtx, fac):
     '''
     Compute vertex and face normals.
@@ -111,7 +138,7 @@ def calc_normals(vtx, fac):
     '''
     
     # Number of vertices
-    nvtx = vtx.shape[0]
+    nV = vtx.shape[0]
         
     # Vertices and edges of each face, their lengths
     tri     = vtx[fac]
@@ -128,7 +155,7 @@ def calc_normals(vtx, fac):
 
     # Accumulate weighted face normal contributions
     # thus avoiding to iterate over vertices
-    vn = np.zeros((nvtx,3))
+    vn = np.zeros((nV,3))
     np.add.at(vn, fac[:,0], cA[:,None] * fn)
     np.add.at(vn, fac[:,1], cB[:,None] * fn)
     np.add.at(vn, fac[:,2], cC[:,None] * fn)
@@ -203,8 +230,8 @@ def voronoi_area(vtx, fac):
     '''
     
     # Number of vertices and faces
-    nvtx = vtx.shape[0]
-    nfac = fac.shape[0]
+    nV = vtx.shape[0]
+    nF = fac.shape[0]
     
     # Vertex coordinates of each original triangular face
     triABC = vtx[fac] # dim0: face indices; dim1: vertices ABC; dim2: (x,y,z) coords.
@@ -255,7 +282,7 @@ def voronoi_area(vtx, fac):
     # are negative, the correct the under/overestimation. All areas are signed
     # Initialize variables for later
     for key in ['BmP','CPn','CmP','APn','AmP','BPn']:
-        tri[key] = np.full((nfac,3,3), 0.0)
+        tri[key] = np.full((nF,3,3), 0.0)
     m = np.full(P.shape, 0.0)
     n = np.full(P.shape, 0.0)
     
@@ -336,7 +363,7 @@ def voronoi_area(vtx, fac):
         area['CbP'] + area['CPa']), axis=1)
     
     # Accumulate vertex Voronoi areas for faces that meet at that vertex
-    vorv = np.zeros(nvtx)
+    vorv = np.zeros(nV)
     np.add.at(vorv, fac, vorf)
     return vorv, vorf, areaABC
 
@@ -359,7 +386,7 @@ def calc_angles(vtx, fac):
     anglesf : NumPy array, num faces by 3 (float).
         Angle at each vertex of a face.
 
-    Note that np.sum(angles, axis=1) is the same as pi = 3.14 (180 degrees),
+    Note that np.sum(anglesf, axis=1) is the same as pi = 3.14 (180 degrees),
     whereas anglesv contains the sum of all angles in anglesf for that vertex
     (referenced by fac). In a plane, this would be 2*pi (360 degrees) but in
     curved surfaces, that can be a different value.
@@ -375,86 +402,60 @@ def calc_angles(vtx, fac):
     return anglesv, anglesf
 
 # =============================================================================
-def iterative_smoothing(dpv, vtx, fac, FWHM=10, mask=None):
+def calc_meyer(vtx, fac, vorv, vtxn):
     '''
-    Smooth vertexwise data iteratively. The number of iterations
-    is determined automatically based on the mesh resolution and FWHM.
+    Compute principal curvatures using the method of Meyer et al (2003).
 
     Parameters
     ----------
-    dpv : NumPy vector
-        Data per vertex to be smoothed.
     vtx : NumPy array with 3 columns (float).
         Vextex coordinates.
     fac : NumPy array with 3 columns (int).
         Face indices.
-    FWHM : float, optional
-        Full-width at half maximum of the Gaussian kernel.
-        The default is 10.
-    mask : NumPy vector (optional)
-        Same size as dpv, with 0 for excluded vertices, 1 for included.
-        It can be a fuzzy mask (values [0..1]).
+    vorv : NumPy vector (float)
+        Voronoi area per vertex.
+    vtxn : Numpy array with 3 columns (float).
+        Vertex normals, unit norm.
 
     Returns
     -------
-    dpvs : NumPy vector with vertexwise data
-        Smoothed data.
+    k1, k2: NumPy vectors with principal curvatures.
     '''
-    import scipy as sp
+    nV = vtx.shape[0]
     
-    # Triangles & their number of vertices
-    tri   = vtx[fac]
-    nV    = dpv.shape[0]
-
-    # Compute edge lengths, will use the mean as the sigma of each iteration
-    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
-    L     = np.linalg.norm(edges, axis=2) # edge lengths
-    meanL = np.mean(L) # each iteration n will use this as its sigma
-    if FWHM/meanL < 2:
-        raise ValueError('With the resolution of this mesh, the minimum FHWM is {}.'.format(2*meanL))
+    # Angles of each vertex of each face (anglesf) and sum of angles
+    # at each vertex (anglesv)
+    anglesv, anglesf = calc_angles(vtx, fac)
     
-    # How many times we should iterate,
-    niter = int(np.ceil((FWHM/meanL*(11/12))**2))
+    # Cotangents
+    cot = 1/np.tan(anglesf)
     
-    # Here we compute the distance within a face between each vertex and the
-    # other two vertices, and compute the filter height at that distance
-    dist  = {}
-    filt  = {}
-    fsum  = np.zeros(nV) # sum of the filter values around each vertex
-    for fv in range(3):
-        dist[fv] = tri - tri[:,[fv,fv,fv],:]
-        dist[fv] = np.linalg.norm(dist[fv], axis=2)
-        filt[fv] = sp.stats.norm.pdf(dist[fv], loc=0, scale=meanL)
-        if mask is not None:
-            for d in range(3):
-                filt[fv][:,d] = filt[fv][:,d]*mask[fac[:,fv]]
-        np.add.at(fsum, fac[:,fv], np.sum(filt[fv], axis=1))
+    # Populate the mean curvature normal operator K
+    # (not to be confused with Gaussian curvature K)
+    # This is Eqn.8 from the paper.
+    mcnoK = np.zeros((nV,3))
+    np.add.at(mcnoK, fac[:,0], cot[:,1] * (vtx[fac[:,0]]-vtx[fac[:,2]]))
+    np.add.at(mcnoK, fac[:,0], cot[:,2] * (vtx[fac[:,0]]-vtx[fac[:,1]]))
+    np.add.at(mcnoK, fac[:,1], cot[:,0] * (vtx[fac[:,1]]-vtx[fac[:,2]]))
+    np.add.at(mcnoK, fac[:,1], cot[:,2] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
+    np.add.at(mcnoK, fac[:,2], cot[:,0] * (vtx[fac[:,2]]-vtx[fac[:,1]]))
+    np.add.at(mcnoK, fac[:,2], cot[:,1] * (vtx[fac[:,2]]-vtx[fac[:,0]]))
+    mcnoK /= (2*vorv[:,None])
     
-    # Let's scale so that for each vertex, the sum of the filter heights is 1
-    fsum = fsum[fac]
-    if mask is None:
-        for fv in range(3):
-            filt[fv] = filt[fv] / fsum[:,fv,None]
-    else:
-        for fv in range(3):
-            filt[fv] = np.divide(filt[fv], fsum[:,fv,None], 
-                                 out   = np.zeros_like(filt[fv]), 
-                                 where = fsum[:,fv,None]!=0)
-            
-    # This is the smoothing proper, done iteratively
-    for n in range(niter):
-        if n == 0:
-            dpvs = np.zeros(nV)
-        else:
-            dpv  = dpvs.copy()
-            dpvs = np.zeros(nV)
-        for fv in range(3):
-            np.add.at(dpvs, fac[:,fv], np.sum(dpv[fac]*filt[fv], axis=1))
+    # Mean curvature
+    H  = 0.5 * np.sum(mcnoK * vtxn, axis=1)
     
-    return dpvs
+    # Gaussian curvature
+    K  = (2*np.pi - anglesv)/vorv
+    
+    # Principal curvatures
+    D  = np.maximum(H**2 - K, 0)
+    k1 = H + np.sqrt(D)
+    k2 = H - np.sqrt(D)
+    return k1, k2
 
 # =============================================================================
-def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
+def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
     Compute curvatures k1 and k2 following the algorithm proposed by
     Rusinkiewicz (2004), as well as the corresponding directions.
@@ -487,27 +488,27 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
     
     # Number of vertices and faces
-    nvtx = vtx.shape[0]
-    nfac = fac.shape[0]
+    nV = vtx.shape[0]
+    nF = fac.shape[0]
     
     # Precompute transforms from the global to local coordinate system of each vertex
-    rotv = np.zeros((3,3,nvtx))
-    for v in range(nvtx):
+    rotv = np.zeros((3,3,nV))
+    for v in range(nV):
        rotv[:,:,v] = normal2zaxis(vtxn[v])
     
     # Allocate space to store the Weingarten matrix for each vertex
-    IIv = np.zeros((2,2,nvtx))
+    IIv = np.zeros((2,2,nV))
     
     # Allocate soace to store k1, k2, and the directions kd1 and kd2
-    k1  = np.zeros(nvtx)
-    k2  = np.zeros(nvtx)
-    kd1 = np.zeros((nvtx,3))
-    kd2 = np.zeros((nvtx,3))
+    k1  = np.zeros(nV)
+    k2  = np.zeros(nV)
+    kd1 = np.zeros((nV,3))
+    kd2 = np.zeros((nV,3))
 
     start_time = time.time()
-    for f in range(nfac):
+    for f in range(nF):
         if progress:
-            utils.progress_bar(f, nfac, start_time, prefix='Processing faces:', min_update_interval=1)
+            utils.progress_bar(f, nF, start_time, prefix='Processing faces:', min_update_interval=1)
             
         # Transformation from the global the local coordinate system of this face
         rotf = normal2zaxis(facn[f])
@@ -592,7 +593,7 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
             IIv[:,:,fac[f,v]] += rotfv[0:2,0:2].T @ IIf @ rotfv[0:2,0:2] * vorf[f,v]
             
     # For each vertex of the mesh
-    for v in range(nvtx):
+    for v in range(nV):
             
         # Normalize the accummulated IIv by the total Voronoi area of this vertex
         IIv[:,:,v] /= vorv[v]
@@ -617,6 +618,15 @@ def calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
         # Confirm that the two principal directions are orthogonal to the normal
         # at this vertex. These two values must be zero; uncomment to test
         # print(np.dot(kd1[v,:],vtxn[v,:]), np.dot(kd2[v,:],vtxn[v,:]))
+        
+        # For complex meshes, small errors in the least squares fitting of
+        # E,F,G can cause the Gauss-Bonnet theorem to be violated.
+        # We know that the sum of K=k1*k2 across the mesh is 2*pi*EC.
+        #EC = calc_EC(vtx,fac)
+        #K0 = np.sum(k1*k2*vorv)/np.sum(vorv)
+        #F  = np.sqrt(K0/2/np.pi/EC)
+        #k1 = k1/F
+        #k2 = k2/F
         
         # Output as a dict, that can be expanded with other metrics
         curvs = {'k1':k1, 'k2':k2, 'kdir1':kd1, 'kdir2':kd2}
@@ -687,17 +697,20 @@ def calc_composites(curvs):
     # Folding Index
     curvs['FI']    = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
     
-    # Curvedness Index, aka Casorati curvature
-    curvs['CI']    = np.sqrt(curvs['k1']**2 + curvs['k2']**2)/np.sqrt(2)
+    # Casorati curvature
+    curvs['C']     = (curvs['k1']**2 + curvs['k2']**2)/2
+    
+    # Willmore Energy, aka Bending Energy
+    curvs['W']     = curvs['H']**2 - curvs['K']
+    
+    # Curvedness Index (square root of Casorati curvature)
+    curvs['CI']    = np.sqrt(curvs['C'])
     
     # Shape Index
     curvs['SI']    = 2*np.arctan((curvs['k1']+curvs['k2'])/(curvs['k1']-curvs['k2']))/np.pi
     
     # Extrinsic Curvature Index
     curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
-    
-    # Willmore Energy, aka Bending Energy
-    curvs['W']     = (curvs['H']**2 - curvs['K'])*curvs['voronoi_area']
     return curvs
 
 # =============================================================================
@@ -713,20 +726,31 @@ def calc_globals(vtx, fac, curvs):
     
     # Isomorphy Shape Factor (ISF)
     gcurvs['ISF']    = gcurvs['area']**(3/2)/gcurvs['volume']
-    
+
+    # Principal curvatures (weighted by area)
+    gcurvs['k1']    = np.sum(curvs['k1']*curvs['voronoi_area'])/gcurvs['area']
+    gcurvs['k2']    = np.sum(curvs['k2']*curvs['voronoi_area'])/gcurvs['area']
+
     # Gaussian curvature. By the Gauss-Bonnet theorem, this should be a constant
-    # equal to 2*pi*EC, where EC is the Euler characteristic
-    gcurvs['K']      = np.sum(curvs['K'])
-    
+    # equal to 2*pi*EC, where EC = V - E + F is the Euler characteristic
+    gcurvs['K']     = np.sum(curvs['K']*curvs['voronoi_area'])/gcurvs['area']
+
+    # Mean curvature
+    gcurvs['H']     = np.sum(curvs['H']*curvs['voronoi_area'])/gcurvs['area']
+
+    # Casorati curvature
+    gcurvs['C']     = np.sum(curvs['C']*curvs['voronoi_area'])/gcurvs['area']
+
     # Willmore energy, aka Total Bending Energy
-    # If we subtract gcurvs['K'], a sphere will have W = 0
-    gcurvs['W']      = np.sum(curvs['H']**2) - gcurvs['K']
+    gcurvs['W']     = np.sum(curvs['H']**2*curvs['voronoi_area'])/gcurvs['area']
+    
+    # If we subtract gcurvs['K'] from W, a sphere will have W = 0
+    gcurvs['W0']    = gcurvs['W'] - gcurvs['K']
     
     # Gyrification Index (GI) or Convexity Ratio (CR)
     from scipy.spatial import ConvexHull
     ch = ConvexHull(vtx)
     gcurvs['GI']     = gcurvs['area']/ch.area
-    
     return gcurvs
 
 # =============================================================================
@@ -1274,3 +1298,82 @@ def geodesic_distances(vtx, fac, method='dijkstra',
         # it's just the upper triangular part
         dist = dijkstra(adj, directed=False, return_predecessors=False)
     return dist
+
+# =============================================================================
+def iterative_smoothing(dpv, vtx, fac, FWHM=10, mask=None):
+    '''
+    Smooth vertexwise data iteratively. The number of iterations
+    is determined automatically based on the mesh resolution and FWHM.
+
+    Parameters
+    ----------
+    dpv : NumPy vector
+        Data per vertex to be smoothed.
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    FWHM : float, optional
+        Full-width at half maximum of the Gaussian kernel.
+        The default is 10.
+    mask : NumPy vector (optional)
+        Same size as dpv, with 0 for excluded vertices, 1 for included.
+        It can be a fuzzy mask (values [0..1]).
+
+    Returns
+    -------
+    dpvs : NumPy vector with vertexwise data
+        Smoothed data.
+    '''
+    import scipy as sp
+    
+    # Triangles & their number of vertices
+    tri   = vtx[fac]
+    nV    = dpv.shape[0]
+
+    # Compute edge lengths, will use the mean as the sigma of each iteration
+    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
+    L     = np.linalg.norm(edges, axis=2) # edge lengths
+    meanL = np.mean(L) # each iteration n will use this as its sigma
+    if FWHM/meanL < 2:
+        raise ValueError('With the resolution of this mesh, the minimum FHWM is {}.'.format(2*meanL))
+    
+    # How many times we should iterate,
+    niter = int(np.ceil((FWHM/meanL*(11/12))**2))
+    
+    # Here we compute the distance within a face between each vertex and the
+    # other two vertices, and compute the filter height at that distance
+    dist  = {}
+    filt  = {}
+    fsum  = np.zeros(nV) # sum of the filter values around each vertex
+    for fv in range(3):
+        dist[fv] = tri - tri[:,[fv,fv,fv],:]
+        dist[fv] = np.linalg.norm(dist[fv], axis=2)
+        filt[fv] = sp.stats.norm.pdf(dist[fv], loc=0, scale=meanL)
+        if mask is not None:
+            for d in range(3):
+                filt[fv][:,d] = filt[fv][:,d]*mask[fac[:,fv]]
+        np.add.at(fsum, fac[:,fv], np.sum(filt[fv], axis=1))
+    
+    # Let's scale so that for each vertex, the sum of the filter heights is 1
+    fsum = fsum[fac]
+    if mask is None:
+        for fv in range(3):
+            filt[fv] = filt[fv] / fsum[:,fv,None]
+    else:
+        for fv in range(3):
+            filt[fv] = np.divide(filt[fv], fsum[:,fv,None], 
+                                 out   = np.zeros_like(filt[fv]), 
+                                 where = fsum[:,fv,None]!=0)
+            
+    # This is the smoothing proper, done iteratively
+    for n in range(niter):
+        if n == 0:
+            dpvs = np.zeros(nV)
+        else:
+            dpv  = dpvs.copy()
+            dpvs = np.zeros(nV)
+        for fv in range(3):
+            np.add.at(dpvs, fac[:,fv], np.sum(dpv[fac]*filt[fv], axis=1))
+    
+    return dpvs

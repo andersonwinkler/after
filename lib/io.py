@@ -84,7 +84,7 @@ def read_curv(filein, is_ascii=False):
     return curv, vec
 
 # -----------------------------------------------------------------------------
-def write_curv(fileout, curv, vec=None, use_ascii=False):
+def write_curv(fileout, curv, vectors=None, use_ascii=False):
     '''
     Write a FreeSurfer curvature file.
     If "vec" is provided and not saving in ASCII, then an ASCII file (.dpv)
@@ -108,15 +108,15 @@ def write_curv(fileout, curv, vec=None, use_ascii=False):
     if use_ascii:
         nvtx = curv.shape[0]
         idx  = np.arange(0,nvtx)[:,None]
-        if vec is None:
-            vec = np.zeros((nvtx,3))
-        data = np.concatenate((idx, vec, curv[:,None]), axis=1)
+        if vectors is None:
+            vectors = np.zeros((nvtx,3))
+        data = np.concatenate((idx, vectors, curv[:,None]), axis=1)
         np.savetxt(fileout, data, fmt='%d %f %f %f %f')
     else:
         nib.freesurfer.io.write_morph_data(fileout, np.asarray(curv, dtype=np.float32))
-        if vec is not None:
+        if vectors is not None:
             fileout = fileout + '.dpv'
-            write_curv(fileout, curv, vec=vec, use_ascii=True)
+            write_curv(fileout, curv, vectors=vectors, use_ascii=True)
     return
 
 # ============================================================================

@@ -78,6 +78,7 @@ if __name__ == "__main__":
     if subj is None:
         subjlist = [None]
         H        = [None]
+        surflist = [None]
     else:        
         # Find SUBJECTS_DIR
         if subjdir is None:
@@ -89,8 +90,8 @@ if __name__ == "__main__":
         subjlist = subj.split(',')   
         H        = ['lh', 'rh']
     
-    # Whether a subject is specified or not, the list of surfaces is defined similarly
-    surflist = surf.split(',')
+        # Surfaces to work on
+        surflist = surf.split(',')
     
     # For each subject and each hemisphere
     for subj in subjlist:
@@ -122,13 +123,17 @@ if __name__ == "__main__":
                 # Compute Voronoi areas
                 print('Computing Voronoi areas per vertex at each face using an inhouse algorithm')
                 vorv, vorf, areas = lib.surf.voronoi_area(vtx, fac)
-            
+                
                 # Compute principal curvatures
                 print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')
-                curvs = lib.surf.calc_curvatures(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
+                curvs = lib.surf.calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
                 
                 # Include Voronoi areas in the set, so it's easier to save
                 curvs['voronoi_area'] = vorv
+                
+                # Compute angle defects (should match K)
+                anglesv, _ = lib.surf.calc_angles(vtx, fac)
+                curvs['angle_defects'] = 2*np.pi - anglesv
                 
                 # Normalize by sqrt(area). This is not recommeded if later the
                 # vertexwise data is subjected to group-level analyses. Instead is
@@ -183,6 +188,7 @@ if __name__ == "__main__":
                             if c in ['kdir1', 'kdir2']:
                                 continue
                             lib.io.write_mgh(fileout, np.asarray(curvs[c], dtype=np.float32).reshape(-1, 1, 1))
+                    lib.io.write_json('{}.global_curvatures.json'.format(outprefix), gcurvs)
                 else:
                     outdir = os.path.join(subjdir, subj, 'after', 'curvs')
                     print('Saving results to directory: {}'.format(outdir))
@@ -197,5 +203,6 @@ if __name__ == "__main__":
                         else:
                             dirs = None
                         fileout = os.path.join(outdir, '{}.{}.{}'.format(h, srf, c))
-                        lib.io.write_curv(fileout, curvs[c], vec=dirs, use_ascii=False)
+                        lib.io.write_curv(fileout, curvs[c], vectors=dirs, use_ascii=True)
+                    lib.io.write_json(os.path.join(outdir, '{}.{}.global_curvatures.json'.format(h, srf)), gcurvs)
     print('Finished computing curvatures.')

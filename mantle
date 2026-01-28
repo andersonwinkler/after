@@ -97,6 +97,6 @@ if __name__ == "__main__":
             os.makedirs(outdir, exist_ok=True)
             for m in mantle:
                 fileout = os.path.join(outdir, '{}.{}'.format(h, m))
-                lib.io.write_curv(fileout, mantle[m], vec=None, use_ascii=False)
+                lib.io.write_curv(fileout, mantle[m], vectors=None, use_ascii=False)
 
     print('Finished computing cortical mantle metrics and mask.')

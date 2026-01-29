@@ -76,7 +76,7 @@ def normal2zaxis(n):
     rot : Rotation matrix
     '''
     n     /= np.linalg.norm(n)
-    z      = np.array([0,0,1])
+    z      = np.array([0,0,1], dtype=float)
     axis   = np.cross(z,n)
     naxis  = np.linalg.norm(axis)
     if naxis > 0:
@@ -453,27 +453,50 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     k1 = H + np.sqrt(D)
     k2 = H - np.sqrt(D)
     
-    # Vertices and edges of each face, their lengths
-    tri       = vtx[fac]
-    edges     = tri[:,[2,0,1],:] - tri[:,[1,2,0],:] # a=C-B, b=A-C, c=B-A
-    lengths   = np.linalg.norm(edges, axis=2)
-    nE        = edges.shape[0]
-        
+    # Edge indices (note each edge appears twice)
+    edg  = np.vstack((fac[:,[0,1]],
+                      fac[:,[1,2]],
+                      fac[:,[2,0]],
+                      fac[:,[1,0]],
+                      fac[:,[2,1]],
+                      fac[:,[0,2]]))
+    oppv = np.vstack((fac[:,2],
+                      fac[:,0],
+                      fac[:,1],
+                      fac[:,2],
+                      fac[:,0],
+                      fac[:,1]))
+    nE2  = edg.shape[0]
+    
+    # Edge segments (its two vertex coordinates) and their lengths
+    seg  = vtx[edg]
+    leng = np.linalg.norm(seg, axis=2)
+    
     # Estimate of the normal curvature in the direction of each edge
-    # This is the not numbered equation after Eqn.12, in page 13
-    kNij      = np.zeros((nE,3))
-    kNij[:,0] = 2 * np.sum(edges[:,0,:] * vtxn[fac[:,0]], axis=1) / lengths[:,0]**2
-    kNij[:,1] = 2 * np.sum(edges[:,1,:] * vtxn[fac[:,1]], axis=1) / lengths[:,1]**2
-    kNij[:,2] = 2 * np.sum(edges[:,2,:] * vtxn[fac[:,2]], axis=1) / lengths[:,2]**2
+    # This is the non-numbered equation after Eqn.12, in page 13
+    segdiff = seg[:,0,:] -  seg[:,1,:]
+    kNij    = 2 * np.sum(segdiff * vtxn[edg[:,0],:], axis=1) / leng**2
     
     # Weights for each edge (top of page 14)
-    wij = np.zeros((nE,1))
-    np.add.at(wij, fac[:,2], cot[fac[:,0]] * lengths[:,0]**2 / 8 / vorv[fac[:,2]])
-    np.add.at(wij, fac[:,0], cot[fac[:,1]] * lengths[:,1]**2 / 8 / vorv[fac[:,0]])
-    np.add.at(wij, fac[:,1], cot[fac[:,2]] * lengths[:,2]**2 / 8 / vorv[fac[:,1]])
-    
+    wij = np.zeros((nE2,1))
+    np.add.at(wij, edg[:,0], cot[oppv] * leng**2 / 8 / vorv[edg[:,0]])
+
     # Unit direction in the tangent plane of each edge
-    dij = ...
+    dij   = np.zeros((nE2,1))
+    subtr = np.sum(-segdiff * vtxn[edg[:,0],:], axis=1, keepdims=True) * vtxn[edg[:,0],:]
+    dij   = -segdiff - subtr
+    dij  /= np.linalg.norm(dij, axis=1) # 3rd col should be equal to zero
+
+    # Neighbors of each vertex (1-ring)
+    nbrs = [set() for v in range(nV)]
+    for f in fac:
+        nbrs[f[0]].update([f[1], f[2]])
+        nbrs[f[1]].update([f[0], f[2]])
+        nbrs[f[2]].update([f[0], f[1]])
+    
+    # Least squares
+    M = np.vstack((dij[0,:]**2, 2*dij[0,:]*dij[1,:], dij[1,:]**2)).T
+    ... # WIP
     
     # Output as a dict that can be expanded with other metrics
     curvs = {'k1':k1, 'k2':k2}

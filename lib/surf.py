@@ -430,7 +430,7 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     # Cotangents
     cot = 1/np.tan(anglesf)
     
-    # Populate the mean curvature normal operator K
+    # Populate the mean curvature normal operator K, i.e., K(x_i)
     # (not to be confused with Gaussian curvature K)
     # This is Eqn.8 from the paper.
     mcnoK = np.zeros((nV,3))
@@ -452,7 +452,32 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     D  = np.maximum(H**2 - K, 0)
     k1 = H + np.sqrt(D)
     k2 = H - np.sqrt(D)
-    return k1, k2
+    
+    # Vertices and edges of each face, their lengths
+    tri       = vtx[fac]
+    edges     = tri[:,[2,0,1],:] - tri[:,[1,2,0],:] # a=C-B, b=A-C, c=B-A
+    lengths   = np.linalg.norm(edges, axis=2)
+    nE        = edges.shape[0]
+        
+    # Estimate of the normal curvature in the direction of each edge
+    # This is the not numbered equation after Eqn.12, in page 13
+    kNij      = np.zeros((nE,3))
+    kNij[:,0] = 2 * np.sum(edges[:,0,:] * vtxn[fac[:,0]], axis=1) / lengths[:,0]**2
+    kNij[:,1] = 2 * np.sum(edges[:,1,:] * vtxn[fac[:,1]], axis=1) / lengths[:,1]**2
+    kNij[:,2] = 2 * np.sum(edges[:,2,:] * vtxn[fac[:,2]], axis=1) / lengths[:,2]**2
+    
+    # Weights for each edge (top of page 14)
+    wij = np.zeros((nE,1))
+    np.add.at(wij, fac[:,2], cot[fac[:,0]] * lengths[:,0]**2 / 8 / vorv[fac[:,2]])
+    np.add.at(wij, fac[:,0], cot[fac[:,1]] * lengths[:,1]**2 / 8 / vorv[fac[:,0]])
+    np.add.at(wij, fac[:,1], cot[fac[:,2]] * lengths[:,2]**2 / 8 / vorv[fac[:,1]])
+    
+    # Unit direction in the tangent plane of each edge
+    dij = ...
+    
+    # Output as a dict that can be expanded with other metrics
+    curvs = {'k1':k1, 'k2':k2}
+    return curvs
 
 # =============================================================================
 def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
@@ -628,7 +653,7 @@ def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
         #k1 = k1/F
         #k2 = k2/F
         
-        # Output as a dict, that can be expanded with other metrics
+        # Output as a dict that can be expanded with other metrics
         curvs = {'k1':k1, 'k2':k2, 'kdir1':kd1, 'kdir2':kd2}
     return curvs
 

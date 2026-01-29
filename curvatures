@@ -131,10 +131,6 @@ if __name__ == "__main__":
                 # Include Voronoi areas in the set, so it's easier to save
                 curvs['voronoi_area'] = vorv
                 
-                # Compute angle defects (should match K)
-                anglesv, _ = lib.surf.calc_angles(vtx, fac)
-                curvs['angle_defects'] = 2*np.pi - anglesv
-                
                 # Normalize by sqrt(area). This is not recommeded if later the
                 # vertexwise data is subjected to group-level analyses. Instead is
                 # is better to include the corresponding global measure as a covariate.

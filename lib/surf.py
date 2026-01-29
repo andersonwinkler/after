@@ -420,6 +420,14 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     Returns
     -------
     k1, k2: NumPy vectors with principal curvatures.
+    k1fit, k2fit : NumPy vectors with principal
+        found by least squares fitting.
+    kdir1 : NumPy array with 3 columns (float).
+        Direction of curvature k1, found by
+        least squares fitting.
+    kdir2 : NumPy array with 3 columns (float).
+        Direction of curvature k2, found by
+        least squares fitting
     '''
     nV = vtx.shape[0]
     
@@ -428,21 +436,21 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     anglesv, anglesf = calc_angles(vtx, fac)
     
     # Cotangents
-    cot = 1/np.tan(anglesf)
+    cot = np.clip(np.cos(anglesf)/np.sin(anglesf),0,1/np.tan(np.pi/2*5/90))
     
     # Populate the mean curvature normal operator K, i.e., K(x_i)
     # (not to be confused with Gaussian curvature K)
     # This is Eqn.8 from the paper.
     mcnoK = np.zeros((nV,3))
-    np.add.at(mcnoK, fac[:,0], cot[:,1] * (vtx[fac[:,0]]-vtx[fac[:,2]]))
-    np.add.at(mcnoK, fac[:,0], cot[:,2] * (vtx[fac[:,0]]-vtx[fac[:,1]]))
-    np.add.at(mcnoK, fac[:,1], cot[:,0] * (vtx[fac[:,1]]-vtx[fac[:,2]]))
-    np.add.at(mcnoK, fac[:,1], cot[:,2] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
-    np.add.at(mcnoK, fac[:,2], cot[:,0] * (vtx[fac[:,2]]-vtx[fac[:,1]]))
-    np.add.at(mcnoK, fac[:,2], cot[:,1] * (vtx[fac[:,2]]-vtx[fac[:,0]]))
+    np.add.at(mcnoK, fac[:,0], cot[:,1,None] * (vtx[fac[:,0]]-vtx[fac[:,2]]))
+    np.add.at(mcnoK, fac[:,0], cot[:,2,None] * (vtx[fac[:,0]]-vtx[fac[:,1]]))
+    np.add.at(mcnoK, fac[:,1], cot[:,0,None] * (vtx[fac[:,1]]-vtx[fac[:,2]]))
+    np.add.at(mcnoK, fac[:,1], cot[:,2,None] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
+    np.add.at(mcnoK, fac[:,2], cot[:,0,None] * (vtx[fac[:,2]]-vtx[fac[:,1]]))
+    np.add.at(mcnoK, fac[:,2], cot[:,1,None] * (vtx[fac[:,2]]-vtx[fac[:,0]]))
     mcnoK /= (2*vorv[:,None])
     
-    # Mean curvature
+    # Mean curvature, Eqn.12 (first line)
     H  = 0.5 * np.sum(mcnoK * vtxn, axis=1)
     
     # Gaussian curvature
@@ -460,46 +468,72 @@ def calc_meyer(vtx, fac, vorv, vtxn):
                       fac[:,[1,0]],
                       fac[:,[2,1]],
                       fac[:,[0,2]]))
-    oppv = np.vstack((fac[:,2],
-                      fac[:,0],
-                      fac[:,1],
-                      fac[:,2],
-                      fac[:,0],
-                      fac[:,1]))
     nE2  = edg.shape[0]
     
+    # Cotangent of the opposing vertices to each edge
+    ocot = np.concatenate((cot[:,2],
+                           cot[:,0],
+                           cot[:,1],
+                           cot[:,2],
+                           cot[:,0],
+                           cot[:,1]))[:,None]
+    
     # Edge segments (its two vertex coordinates) and their lengths
-    seg  = vtx[edg]
-    leng = np.linalg.norm(seg, axis=2)
+    seg = vtx[edg]
     
     # Estimate of the normal curvature in the direction of each edge
     # This is the non-numbered equation after Eqn.12, in page 13
-    segdiff = seg[:,0,:] -  seg[:,1,:]
-    kNij    = 2 * np.sum(segdiff * vtxn[edg[:,0],:], axis=1) / leng**2
+    segdiff = seg[:,0,:] - seg[:,1,:]
+    sxn     = np.sum(segdiff*vtxn[edg[:,0],:], axis=1, keepdims=True)
+    leng    = np.linalg.norm(segdiff, axis=1, keepdims=True)
+    kNij    = 2 * sxn / (leng**2)
     
     # Weights for each edge (top of page 14)
     wij = np.zeros((nE2,1))
-    np.add.at(wij, edg[:,0], cot[oppv] * leng**2 / 8 / vorv[edg[:,0]])
-
-    # Unit direction in the tangent plane of each edge
-    dij   = np.zeros((nE2,1))
-    subtr = np.sum(-segdiff * vtxn[edg[:,0],:], axis=1, keepdims=True) * vtxn[edg[:,0],:]
-    dij   = -segdiff - subtr
-    dij  /= np.linalg.norm(dij, axis=1) # 3rd col should be equal to zero
-
-    # Neighbors of each vertex (1-ring)
-    nbrs = [set() for v in range(nV)]
-    for f in fac:
-        nbrs[f[0]].update([f[1], f[2]])
-        nbrs[f[1]].update([f[0], f[2]])
-        nbrs[f[2]].update([f[0], f[1]])
+    np.add.at(wij, edg[:,0], ocot * leng**2 / 8 / vorv[edg[:,0],None])
+    wij_rt = np.sqrt(wij)
     
-    # Least squares
-    M = np.vstack((dij[0,:]**2, 2*dij[0,:]*dij[1,:], dij[1,:]**2)).T
-    ... # WIP
+    # Basis for tangent plane at each vertex
+    rndvec = np.random.rand(nV,3)
+    tx  = np.cross(vtxn, rndvec, axis=1)
+    ty  = np.cross(vtxn, tx,     axis=1)
+    tx /= np.linalg.norm(tx, axis=1, keepdims=True)
+    ty /= np.linalg.norm(ty, axis=1, keepdims=True)
     
+    # Unit vectors, still in 3D
+    dij   = -segdiff + sxn * vtxn[edg[:,0],:]
+    dij  /= np.linalg.norm(dij, axis=1, keepdims=True)
+    
+    # Unit vectors, in the tangent plane
+    d1 = np.sum(dij*tx[edg[:,0],:], axis=1, keepdims=True)
+    d2 = np.sum(dij*ty[edg[:,0],:], axis=1, keepdims=True)
+    
+    # Edges that connect at each vertex (1-ring)
+    vedgs = [set() for v in range(nV)]
+    for eidx, e in enumerate(edg):
+        vedgs[e[0]].add(eidx)
+    
+    # Least squares fitting (last equation in page 14)
+    k1fit  = np.zeros(nV)
+    k2fit  = np.zeros(nV)
+    kd1fit = np.zeros((nV,3))
+    kd2fit = np.zeros((nV,3))
+    M      = wij_rt * np.hstack((d1**2, 2*d1*d2, d2**2))
+    kNij   = wij_rt * kNij
+    
+    for v in range(nV):
+        print(v)
+        a,b,c        = np.squeeze(np.linalg.lstsq(M[vedgs[v]],kNij[vedgs[v]], rcond=None)[0])
+        B            = np.array([[a,b],[b,c]])
+        kvals, kdirs = np.linalg.eig(B)
+        idx          = np.argsort(kvals)[::-1] # sort in descending order
+        k1fit[v]     = kvals[idx[0]]
+        k2fit[v]     = kvals[idx[1]]
+        kd1fit[v,:]  = kdirs[idx[0],:]
+        kd2fit[v,:]  = kdirs[idx[1],:]
     # Output as a dict that can be expanded with other metrics
-    curvs = {'k1':k1, 'k2':k2}
+    curvs = {'k1':k1, 'k2':k2,
+             'k1fit':k1fit, 'k2fit':k2fit, 'kdir1':kd1fit, 'kdir2':kd2fit}
     return curvs
 
 # =============================================================================
@@ -529,9 +563,9 @@ def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
         Curvature k1.
     k2 : NumPy vector (float)
         Curvature k2.
-    kd1 : NumPy array with 3 columns (float).
+    kdir1 : NumPy array with 3 columns (float).
         Direction of curvature k1.
-    kd2 : NumPy array with 3 columns (float).
+    kdir2 : NumPy array with 3 columns (float).
         Direction of curvature k2.
     '''
     
@@ -666,16 +700,7 @@ def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
         # Confirm that the two principal directions are orthogonal to the normal
         # at this vertex. These two values must be zero; uncomment to test
         # print(np.dot(kd1[v,:],vtxn[v,:]), np.dot(kd2[v,:],vtxn[v,:]))
-        
-        # For complex meshes, small errors in the least squares fitting of
-        # E,F,G can cause the Gauss-Bonnet theorem to be violated.
-        # We know that the sum of K=k1*k2 across the mesh is 2*pi*EC.
-        #EC = calc_EC(vtx,fac)
-        #K0 = np.sum(k1*k2*vorv)/np.sum(vorv)
-        #F  = np.sqrt(K0/2/np.pi/EC)
-        #k1 = k1/F
-        #k2 = k2/F
-        
+                
         # Output as a dict that can be expanded with other metrics
         curvs = {'k1':k1, 'k2':k2, 'kdir1':kd1, 'kdir2':kd2}
     return curvs

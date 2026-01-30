@@ -402,9 +402,55 @@ def calc_angles(vtx, fac):
     return anglesv, anglesf
 
 # =============================================================================
-def calc_meyer(vtx, fac, vorv, vtxn):
+def mixed_area(fac, anglesf, vorf, area):
     '''
-    Compute principal curvatures using the method of Meyer et al (2003).
+    Compute the "mixed" area, that is, replace the Voronoi area at each
+    obtuse vertex of a face by area/2, and the area of the remaining
+    two vertices with area/4.
+    Faces that are not obtuse remain unchanged. This is used to compute
+    curvatures using the Meyer et al. (2003) method.
+
+    Parameters
+    ----------
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    anglesf : NumPy array, num faces by 3 (float).
+        Angle at each vertex of a face.
+    vorf : NumPy array with 3 columns (float).
+        Voronoi area per vertex per face.
+    area : NumPy vector (float)
+        Area per face
+
+    Returns
+    -------
+    vorv : NumPy vector (float)
+        Mixed area per vertex.
+    vorf : NumPy array with 3 columns (float).
+        Mixed area per vertex per face.
+    '''
+    # Indices of obtuse angles
+    aidx = anglesf > np.pi/2
+    
+    # Indices of obtuse faces
+    fidx = np.any(aidx, axis=1)
+    
+    # First populate all angles in obtuse faces with area/4
+    # then update the obtuse angles with area/2
+    mixf = vorf
+    mixf[fidx,:] = area[fidx,None]/4
+    mixf[aidx]   = area[fidx]/2
+    
+    # Accumulate vertex mixed areas for faces that meet at that vertex
+    nV   = np.max(fac)+1
+    mixv = np.zeros(nV)
+    np.add.at(mixv, fac, mixf)
+    return mixv, mixf
+
+# =============================================================================
+def calc_meyer(vtx, fac, vorv, vtxn, progress=False):
+    '''
+    Compute curvatures k1 and k2  and principal directions following 
+    the algorithm proposed by Meyer et al. (2003).
 
     Parameters
     ----------
@@ -436,7 +482,8 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     anglesv, anglesf = calc_angles(vtx, fac)
     
     # Cotangents
-    cot = np.clip(np.cos(anglesf)/np.sin(anglesf),0,1/np.tan(np.pi/2*5/90))
+    cthr = 1/np.tan(np.pi/180)
+    cot = np.clip(np.cos(anglesf)/np.sin(anglesf),-cthr,cthr)
     
     # Populate the mean curvature normal operator K, i.e., K(x_i)
     # (not to be confused with Gaussian curvature K)
@@ -461,86 +508,88 @@ def calc_meyer(vtx, fac, vorv, vtxn):
     k1 = H + np.sqrt(D)
     k2 = H - np.sqrt(D)
     
-    # Edge indices (note each edge appears twice)
-    edg  = np.vstack((fac[:,[0,1]],
-                      fac[:,[1,2]],
-                      fac[:,[2,0]],
-                      fac[:,[1,0]],
-                      fac[:,[2,1]],
-                      fac[:,[0,2]]))
-    nE2  = edg.shape[0]
+    # Precompute transforms from the global to local coordinate system of each vertex
+    rotv = np.zeros((3,3,nV))
+    for v in range(nV):
+       rotv[:,:,v] = normal2zaxis(vtxn[v])
     
-    # Cotangent of the opposing vertices to each edge
-    ocot = np.concatenate((cot[:,2],
-                           cot[:,0],
-                           cot[:,1],
-                           cot[:,2],
-                           cot[:,0],
-                           cot[:,1]))[:,None]
+    # Vertex neighbors (1-ring) and cotangents of opposing angles
+    nbrs = [[] for _ in range(nV)] # To store neighbors
+    cots = [[] for _ in range(nV)] # To store the sum of the cotangents of opposite angles
+    cthr = 1/np.tan(np.pi/180)  # We don't want huge or negative cotangents; clip at 90 & 1 degrees
+    for fidx,f in enumerate(fac):
+        idxs = [(0,1,2),(1,2,0),(2,0,1)]
+        for idx in idxs:
+            v, e, o = idx
+            if f[e] in nbrs[f[v]]:
+                idx = nbrs[f[v]].index(f[e])
+                cots[f[v]][idx] += cot[fidx,o]
+            else:
+                nbrs[f[v]].append(f[e])
+                cots[f[v]].append(cot[fidx,o])
     
-    # Edge segments (its two vertex coordinates) and their lengths
-    seg = vtx[edg]
-    
-    # Estimate of the normal curvature in the direction of each edge
-    # This is the non-numbered equation after Eqn.12, in page 13
-    segdiff = seg[:,0,:] - seg[:,1,:]
-    sxn     = np.sum(segdiff*vtxn[edg[:,0],:], axis=1, keepdims=True)
-    leng    = np.linalg.norm(segdiff, axis=1, keepdims=True)
-    kNij    = 2 * sxn / (leng**2)
-    
-    # Weights for each edge (top of page 14)
-    wij = np.zeros((nE2,1))
-    np.add.at(wij, edg[:,0], ocot * leng**2 / 8 / vorv[edg[:,0],None])
-    wij_rt = np.sqrt(wij)
-    
-    # Basis for tangent plane at each vertex
-    rndvec = np.random.rand(nV,3)
-    tx  = np.cross(vtxn, rndvec, axis=1)
-    ty  = np.cross(vtxn, tx,     axis=1)
-    tx /= np.linalg.norm(tx, axis=1, keepdims=True)
-    ty /= np.linalg.norm(ty, axis=1, keepdims=True)
-    
-    # Unit vectors, still in 3D
-    dij   = -segdiff + sxn * vtxn[edg[:,0],:]
-    dij  /= np.linalg.norm(dij, axis=1, keepdims=True)
-    
-    # Unit vectors, in the tangent plane
-    d1 = np.sum(dij*tx[edg[:,0],:], axis=1, keepdims=True)
-    d2 = np.sum(dij*ty[edg[:,0],:], axis=1, keepdims=True)
-    
-    # Edges that connect at each vertex (1-ring)
-    vedgs = [set() for v in range(nV)]
-    for eidx, e in enumerate(edg):
-        vedgs[e[0]].add(eidx)
-    
-    # Least squares fitting (last equation in page 14)
+    # Allocate space to store k1, k2, and the directions kd1 and kd2
     k1fit  = np.zeros(nV)
     k2fit  = np.zeros(nV)
     kd1fit = np.zeros((nV,3))
     kd2fit = np.zeros((nV,3))
-    M      = wij_rt * np.hstack((d1**2, 2*d1*d2, d2**2))
-    kNij   = wij_rt * kNij
     
+    # Main loop over vertices for the principal directions
+    start_time = time.time()
     for v in range(nV):
-        print(v)
-        a,b,c        = np.squeeze(np.linalg.lstsq(M[vedgs[v]],kNij[vedgs[v]], rcond=None)[0])
-        B            = np.array([[a,b],[b,c]])
+        if progress:
+            utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+            
+        nbrs[v] = list(nbrs[v])
+        
+        # Estimate of the normal curvature in the direction of each edge
+        # This is the non-numbered equation after Eqn.12, in page 13
+        edg0   = vtx[[v]] - vtx[nbrs[v]]
+        sqnorm = np.linalg.norm(edg0, axis=1, keepdims=True)**2
+        kNij   = 2 * np.sum(edg0*vtxn[[v]], axis=1, keepdims=True) / sqnorm
+    
+        # Weights for each edge (top of page 14)
+        wij    = np.array(cots[v])[:,None] * sqnorm / 8 / vorv[v]
+        rtwij  = np.sign(wij) * np.sqrt(np.abs(wij))
+        
+        # Rotate coordinate system so that dij are the unit directions
+        # of the edges in the tangent plane to the current vertex
+        dij = -edg0 @ rotv[:,:,v]
+        dij = dij[:,0:2]/np.linalg.norm(dij[:,0:2], axis=1, keepdims=True) # z coordinate is zero
+        du  = dij[:,[0]]
+        dv  = dij[:,[1]]
+        
+        # Least squares fitting (last equation in page 14)
+        M      = rtwij * np.hstack((du**2, 2*du*dv, dv**2))
+        kNij   = rtwij * kNij
+        a,b,c  = np.squeeze(np.linalg.lstsq(M,kNij, rcond=None)[0])
+        B      = np.array([[a,b],[b,c]])
+        
+        # Compute principal curvatures and their directions (eigenvalues and eigenvectors)
         kvals, kdirs = np.linalg.eig(B)
-        idx          = np.argsort(kvals)[::-1] # sort in descending order
+        
+        # Put back in the global coordinate system, from the vertex local coordinate system
+        kdirs = np.vstack((kdirs, np.zeros((1,2)))).T
+        kdirs = kdirs @ rotv[:,:,v].T
+    
+        # Sort in descending order
+        idx          = np.argsort(kvals)[::-1] 
         k1fit[v]     = kvals[idx[0]]
         k2fit[v]     = kvals[idx[1]]
         kd1fit[v,:]  = kdirs[idx[0],:]
         kd2fit[v,:]  = kdirs[idx[1],:]
+    
     # Output as a dict that can be expanded with other metrics
-    curvs = {'k1':k1, 'k2':k2,
-             'k1fit':k1fit, 'k2fit':k2fit, 'kdir1':kd1fit, 'kdir2':kd2fit}
+    curvs = {'k1':k1,        'k2':k2,
+             'k1fit':k1fit,  'k2fit':k2fit, # less accurate, top of page 15
+             'kdir1':kd1fit, 'kdir2':kd2fit}
     return curvs
 
 # =============================================================================
 def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
-    Compute curvatures k1 and k2 following the algorithm proposed by
-    Rusinkiewicz (2004), as well as the corresponding directions.
+    Compute curvatures k1 and k2  and principal directions following 
+    the algorithm proposed by Rusinkiewicz (2004).
 
     Parameters
     ----------
@@ -581,11 +630,15 @@ def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     # Allocate space to store the Weingarten matrix for each vertex
     IIv = np.zeros((2,2,nV))
     
-    # Allocate soace to store k1, k2, and the directions kd1 and kd2
+    # Allocate space to store k1, k2, and the directions kd1 and kd2
     k1  = np.zeros(nV)
     k2  = np.zeros(nV)
     kd1 = np.zeros((nV,3))
     kd2 = np.zeros((nV,3))
+
+    # Axes (uf,vf,wf) of the local face coordinate system
+    uf = np.array([1,0,0])
+    vf = np.array([0,1,0])
 
     start_time = time.time()
     for f in range(nF):
@@ -595,10 +648,6 @@ def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
         # Transformation from the global the local coordinate system of this face
         rotf = normal2zaxis(facn[f])
 
-        # Axes (uf,vf,wf) of the local face coordinate system
-        uf = np.array([1,0,0])
-        vf = np.array([0,1,0])
-        
         # Confirm that the face normal matches the z of the coordinate system.
         # This must be (0,0,1); uncomment to test
         # print(facn[f] @ rotf)

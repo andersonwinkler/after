@@ -23,36 +23,46 @@ if __name__ == "__main__":
                         'In the latter case, the paths to the files must be specified.',
                         epilog=\
                         'Anderson M. Winkler / UTRGV / May 2025 / https://brainder.org')
+        
     # Options to call specifying a subject
     parser.add_argument('--subj',
-                        help='List of subjects separated by commas',
+                        help='List of subjects separated by commas.',
                         type=str, required=False, default=None)
     parser.add_argument('--subjdir',
-                        help='Subjects directory (usually SUBJECTS_DIR)',
+                        help='Subjects directory (usually SUBJECTS_DIR).',
                         type=str, required=False, default=None)
     parser.add_argument('--surf',
-                        help='Surfaces to compute curvatures from, if invoked with "--subj", separated by commas (default: white,pial)',
+                        help='Surfaces to compute curvatures from, if invoked with "--subj", separated by commas (default: white,pial).',
                         type=str, required=False, default='white,pial')
+    
     # Options to call with specific files
     parser.add_argument('--in', dest='filein',
-                        help="Input surface file",
+                        help="Input surface file.",
                         type=str, required=False, default=None)
     parser.add_argument('--it', dest='intype',
-                        help="Input type (file format)",
+                        help="Input type (file format).",
                         type=str, required=False, default='surf')
     parser.add_argument('--outprefix', dest='outprefix',
-                        help="Prefix for output curvature files",
+                        help="Prefix for output curvature files.",
                         type=str, required=False, default=None)
     parser.add_argument('--ot', dest='outtype',
-                        help="Output type (file format)",
+                        help="Output type (file format).",
                         type=str, required=False, default='curv')
+    
+    # Which method to use?
+    parser.add_argument('--method', dest='method',
+                        help="Method to compute curvatures. Can be Meyer or Rusinkiewicz.",
+                        choices=['rusinkiewicz', 'meyer'],
+                        type=str.lower, required=False, default='rusinkiewicz')
+    
     # Normalize by the overall mesh surface area?
     parser.add_argument('--normalize',
-                        help='Normalize curvature by sqrt(area)',
+                        help='Normalize curvature by sqrt(area).',
                         action='store_true', required=False, default=False)
+    
     # Show a nice progress bar (only use in interactive sessions)
     parser.add_argument('--progress',
-                        help='Show a progress bar (avoid in headless systems)',
+                        help='Show a progress bar (avoid in headless systems).',
                         action='store_true', required=False, default=False)
     
     # Parsing proper
@@ -64,6 +74,7 @@ if __name__ == "__main__":
     intype    = args.intype.lower()
     outprefix = args.outprefix
     outtype   = args.outtype.lower()
+    method    = args.method
     normalize = args.normalize
     progress  = args.progress
     
@@ -84,7 +95,7 @@ if __name__ == "__main__":
         if subjdir is None:
             subjdir = os.getenv('SUBJECTS_DIR')
         if subjdir == '' or subjdir is None:
-            raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set')
+            raise SyntaxError('Either --subjdir option must be provided, or the environmental variable SUBJECTS_DIR must be set.')
         
         # Make a list of subjects
         subjlist = subj.split(',')   
@@ -117,17 +128,29 @@ if __name__ == "__main__":
                     vtx = vtx + info['cras']
                     
                 # Compute vertex normals
-                print('Computing face and vertex normals using the Max (1999) algorithm')
+                print('Computing face and vertex normals using the Max (1999) algorithm.')
                 vtxn, facn = lib.surf.calc_normals(vtx, fac)
                 
                 # Compute Voronoi areas
-                print('Computing Voronoi areas per vertex at each face using an inhouse algorithm')
-                vorv, vorf, areas = lib.surf.voronoi_area(vtx, fac)
+                print('Computing Voronoi areas per vertex at each face using an inhouse algorithm.')
+                vorv, vorf, area = lib.surf.voronoi_area(vtx, fac)
                 
                 # Compute principal curvatures
-                print('Computing principal curvatures using the Rusinkiewicz (2004) algorithm')
-                curvs = lib.surf.calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
-                
+                if method == 'meyer':
+                    
+                    print('Computing angles per vertex at each face.')
+                    _, anglesf = lib.surf.calc_angles(vtx, fac)
+                    
+                    print('Computing mixed areas per vertex at each face.')
+                    mixv, mixf = lib.surf.mixed_area(fac, anglesf, vorf, area)
+                    
+                    print('Computing principal curvatures using the Meyer et al. (2003) method.')
+                    curvs = lib.surf.calc_meyer(vtx, fac, mixv, vtxn, progress=progress)
+                    
+                elif method == 'rusinkiewicz':
+                    print('Computing principal curvatures using the Rusinkiewicz (2004) method.')
+                    curvs = lib.surf.calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
+                    
                 # Include Voronoi areas in the set, so it's easier to save
                 curvs['voronoi_area'] = vorv
                 
@@ -140,21 +163,21 @@ if __name__ == "__main__":
                     curvs['k2'] = curvs['k2']*np.sqrt(area)
                     
                 # Compute composite measures based on k1 and k2
-                print('Computing composite curvatures from the principal curvatures')
+                print('Computing composite curvatures from the principal curvatures.')
                 curvs = lib.surf.calc_composites(curvs)
                 
                 # Compute global curvatures
-                print('Computing global curvature indices')                
+                print('Computing global curvature indices.')                
                 gcurvs = lib.surf.calc_globals(vtx, fac, curvs)
                 
                 # Compute the fractal dimension. Results will be for
                 # one level of resolution down, facewise
-                print('Computing facewise fractal dimension using an inhouse algorithm')
+                print('Computing facewise fractal dimension using an inhouse algorithm.')
                 FD = lib.surf.calc_fd(vtx, fac, fsmode=True)
                 
                 # Upsample FD just slightly from facewise to vertexwise, to be
                 # in the resolution of the original mesh
-                print('Converting facewise fractal dimension to vertexwise')
+                print('Converting facewise fractal dimension to vertexwise.')
                 _, facd = lib.platonic.icodown(vtx, fac, 1)
                 curvs['FD'] = lib.platonic.dpf2dpv(FD, facd, facu=fac, pycno=False, fsmode=True)
                 

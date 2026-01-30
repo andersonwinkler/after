@@ -126,31 +126,43 @@ if __name__ == "__main__":
                     print('Reading input file: {}'.format(filein))
                     vtx, fac, info, _ = lib.io.read_surf(filein)
                     vtx = vtx + info['cras']
-                    
+
                 # Compute vertex normals
                 print('Computing face and vertex normals using the Max (1999) algorithm.')
                 vtxn, facn = lib.surf.calc_normals(vtx, fac)
+
+                print('Computing angles per vertex at each face.')
+                anglesv, anglesf = lib.surf.calc_angles(vtx, fac)
                 
                 # Compute Voronoi areas
                 print('Computing Voronoi areas per vertex at each face using an inhouse algorithm.')
-                vorv, vorf, area = lib.surf.voronoi_area(vtx, fac)
+                vorv, vorf = lib.surf.voronoi_area(vtx, fac)
                 
                 # Compute principal curvatures
-                if method == 'meyer':
+                if method.startswith('meyer'):
                     
-                    print('Computing angles per vertex at each face.')
-                    _, anglesf = lib.surf.calc_angles(vtx, fac)
-                    
-                    print('Computing mixed areas per vertex at each face.')
-                    mixv, mixf = lib.surf.mixed_area(fac, anglesf, vorf, area)
+                    # Which area to use in the Meyer method?
+                    if method.endswith('voronoi'):
+                        areav = vorv
+                    else:
+                        print('Computing mixed areas per vertex at each face.')
+                        mixv, mixf = lib.surf.mixed_area(fac, anglesf, vorf)
+                        areav = mixv
                     
                     print('Computing principal curvatures using the Meyer et al. (2003) method.')
-                    curvs = lib.surf.calc_meyer(vtx, fac, mixv, vtxn, progress=progress)
+                    curvs = lib.surf.calc_meyer(vtx, fac, vtxn, areav, progress=progress)
+                    
+                    if not method.endswith('voronoi'):
+                        curvs['mixed_area'] = mixv
                     
                 elif method == 'rusinkiewicz':
+
                     print('Computing principal curvatures using the Rusinkiewicz (2004) method.')
                     curvs = lib.surf.calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=progress)
                     
+                # It's good to have the angle deficits also, to compare with K
+                curvs['angle_deficits'] = 2*np.pi - anglesv
+                
                 # Include Voronoi areas in the set, so it's easier to save
                 curvs['voronoi_area'] = vorv
                 
@@ -172,14 +184,14 @@ if __name__ == "__main__":
                 
                 # Compute the fractal dimension. Results will be for
                 # one level of resolution down, facewise
-                print('Computing facewise fractal dimension using an inhouse algorithm.')
-                FD = lib.surf.calc_fd(vtx, fac, fsmode=True)
+                # print('Computing facewise fractal dimension using an inhouse algorithm.')
+                # FD = lib.surf.calc_fd(vtx, fac, fsmode=True)
                 
                 # Upsample FD just slightly from facewise to vertexwise, to be
                 # in the resolution of the original mesh
-                print('Converting facewise fractal dimension to vertexwise.')
-                _, facd = lib.platonic.icodown(vtx, fac, 1)
-                curvs['FD'] = lib.platonic.dpf2dpv(FD, facd, facu=fac, pycno=False, fsmode=True)
+                # print('Converting facewise fractal dimension to vertexwise.')
+                # _, facd = lib.platonic.icodown(vtx, fac, 1)
+                # curvs['FD'] = lib.platonic.dpf2dpv(FD, facd, facu=fac, pycno=False, fsmode=True)
                 
                 # Save results
                 if subj is None or h is None:

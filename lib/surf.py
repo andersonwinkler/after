@@ -365,10 +365,23 @@ def voronoi_area(vtx, fac):
     # Accumulate vertex Voronoi areas for faces that meet at that vertex
     vorv = np.zeros(nV)
     np.add.at(vorv, fac, vorf)
-    return vorv, vorf, areaABC
+    return vorv, vorf
 
 # =============================================================================
-def calc_angles(vtx, fac):
+def calc_angles_old(vtx, fac):
+    '''Use the newer one, below, as it's more robust for odd meshes.'''
+    tri   = vtx[fac]
+    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
+    L     = np.linalg.norm(edges, axis=2)
+    cos   = (L[:,[1,0,0]]**2 + L[:,[2,2,1]]**2 - L**2) / 2 / L[:,[1,0,0]] / L[:,[2,2,1]]
+    cos   = np.clip(cos, -1.0, 1.0)
+    anglesf = np.arccos(cos)
+    anglesv = np.zeros(vtx.shape[0])
+    np.add.at(anglesv, fac, anglesf)
+    return anglesv, anglesf
+
+# =============================================================================
+def calc_angles(vtx, fac, eps=1e-15):
     '''
     Compute the angles at each vertex of a face.
 
@@ -391,18 +404,34 @@ def calc_angles(vtx, fac):
     (referenced by fac). In a plane, this would be 2*pi (360 degrees) but in
     curved surfaces, that can be a different value.
     '''
-    tri   = vtx[fac]
-    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
-    L     = np.linalg.norm(edges, axis=2)
-    cos   = (L[:,[1,0,0]]**2 + L[:,[2,2,1]]**2 - L**2) / 2 / L[:,[1,0,0]] / L[:,[2,2,1]]
-    cos   = np.clip(cos, -1.0, 1.0)
-    anglesf = np.arccos(cos)
+    # Edges
+    tri = vtx[fac]
+    eA  = tri[:,1,:]-tri[:,2,:] # edge opposite to A, centered at C
+    eB  = tri[:,2,:]-tri[:,0,:] # edge opposite to B, centered at B
+    eC  = tri[:,0,:]-tri[:,1,:] # edge opposite to C, centered at A
+    
+    # Angle between edges
+    def ang(u, v):
+        dp = np.sum(u * v, axis=1)
+        cp = np.linalg.norm(np.cross(u, v), axis=1)
+        cp = np.maximum(cp, eps)  # guard degenerate faces
+        return np.arctan2(cp, dp)
+    aA = ang(-eC, eB) # angle at A
+    aB = ang(-eA, eC) # angle at B
+    aC = ang(-eB, eA) # angle at C
+
+    # Angles at each edge of each face
+    anglesf = np.stack([aA, aB, aC], axis=1)
+    
+    # Sum of angles at each vertex
     anglesv = np.zeros(vtx.shape[0])
-    np.add.at(anglesv, fac, anglesf)
+    np.add.at(anglesv, fac[:,0], aA)
+    np.add.at(anglesv, fac[:,1], aB)
+    np.add.at(anglesv, fac[:,2], aC)
     return anglesv, anglesf
 
 # =============================================================================
-def mixed_area(fac, anglesf, vorf, area):
+def mixed_area(fac, anglesf, vorf):
     '''
     Compute the "mixed" area, that is, replace the Voronoi area at each
     obtuse vertex of a face by area/2, and the area of the remaining
@@ -418,8 +447,6 @@ def mixed_area(fac, anglesf, vorf, area):
         Angle at each vertex of a face.
     vorf : NumPy array with 3 columns (float).
         Voronoi area per vertex per face.
-    area : NumPy vector (float)
-        Area per face
 
     Returns
     -------
@@ -428,6 +455,9 @@ def mixed_area(fac, anglesf, vorf, area):
     vorf : NumPy array with 3 columns (float).
         Mixed area per vertex per face.
     '''
+    # Area per face
+    farea = np.sum(vorf, axis=1)
+    
     # Indices of obtuse angles
     aidx = anglesf > np.pi/2
     
@@ -437,8 +467,8 @@ def mixed_area(fac, anglesf, vorf, area):
     # First populate all angles in obtuse faces with area/4
     # then update the obtuse angles with area/2
     mixf = vorf
-    mixf[fidx,:] = area[fidx,None]/4
-    mixf[aidx]   = area[fidx]/2
+    mixf[fidx,:] = farea[fidx,None]/4
+    mixf[aidx]   = farea[fidx]/2
     
     # Accumulate vertex mixed areas for faces that meet at that vertex
     nV   = np.max(fac)+1
@@ -447,7 +477,7 @@ def mixed_area(fac, anglesf, vorf, area):
     return mixv, mixf
 
 # =============================================================================
-def calc_meyer(vtx, fac, vorv, vtxn, progress=False):
+def calc_meyer(vtx, fac, vtxn, mixv, progress=False):
     '''
     Compute curvatures k1 and k2  and principal directions following 
     the algorithm proposed by Meyer et al. (2003).
@@ -459,7 +489,7 @@ def calc_meyer(vtx, fac, vorv, vtxn, progress=False):
     fac : NumPy array with 3 columns (int).
         Face indices.
     vorv : NumPy vector (float)
-        Voronoi area per vertex.
+        Mixed area per vertex (see paper).
     vtxn : Numpy array with 3 columns (float).
         Vertex normals, unit norm.
 
@@ -495,13 +525,14 @@ def calc_meyer(vtx, fac, vorv, vtxn, progress=False):
     np.add.at(mcnoK, fac[:,1], cot[:,2,None] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
     np.add.at(mcnoK, fac[:,2], cot[:,0,None] * (vtx[fac[:,2]]-vtx[fac[:,1]]))
     np.add.at(mcnoK, fac[:,2], cot[:,1,None] * (vtx[fac[:,2]]-vtx[fac[:,0]]))
-    mcnoK /= (2*vorv[:,None])
+    mcnoK /= (2*mixv[:,None])
     
     # Mean curvature, Eqn.12 (first line)
     H  = 0.5 * np.sum(mcnoK * vtxn, axis=1)
     
     # Gaussian curvature
-    K  = (2*np.pi - anglesv)/vorv
+    AD = 2*np.pi - anglesv # angle deficit
+    K  = AD/mixv
     
     # Principal curvatures
     D  = np.maximum(H**2 - K, 0)
@@ -549,7 +580,7 @@ def calc_meyer(vtx, fac, vorv, vtxn, progress=False):
         kNij   = 2 * np.sum(edg0*vtxn[[v]], axis=1, keepdims=True) / sqnorm
     
         # Weights for each edge (top of page 14)
-        wij    = np.array(cots[v])[:,None] * sqnorm / 8 / vorv[v]
+        wij    = np.array(cots[v])[:,None] * sqnorm / 8 / mixv[v]
         rtwij  = np.sign(wij) * np.sqrt(np.abs(wij))
         
         # Rotate coordinate system so that dij are the unit directions

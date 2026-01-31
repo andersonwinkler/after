@@ -52,7 +52,7 @@ if __name__ == "__main__":
     # Which method to use?
     parser.add_argument('--method', dest='method',
                         help="Method to compute curvatures. Can be Meyer or Rusinkiewicz.",
-                        choices=['rusinkiewicz', 'meyer'],
+                        choices=['rusinkiewicz', 'meyer', 'meyer-voronoi', 'meyer-mixed'],
                         type=str.lower, required=False, default='rusinkiewicz')
     
     # Normalize by the overall mesh surface area?
@@ -142,17 +142,17 @@ if __name__ == "__main__":
                 if method.startswith('meyer'):
                     
                     # Which area to use in the Meyer method?
-                    if method.endswith('voronoi'):
-                        areav = vorv
-                    else:
+                    if method.endswith('mixed'):
                         print('Computing mixed areas per vertex at each face.')
                         mixv, mixf = lib.surf.mixed_area(fac, anglesf, vorf)
                         areav = mixv
+                    else:
+                        areav = vorv
                     
                     print('Computing principal curvatures using the Meyer et al. (2003) method.')
-                    curvs = lib.surf.calc_meyer(vtx, fac, vtxn, areav, progress=progress)
+                    curvs = lib.surf.calc_meyer(vtx, fac, vtxn, areav, solver='roots', progress=progress)
                     
-                    if not method.endswith('voronoi'):
+                    if method.endswith('mixed'):
                         curvs['mixed_area'] = mixv
                     
                 elif method == 'rusinkiewicz':
@@ -199,9 +199,9 @@ if __name__ == "__main__":
                     if outtype in ['asc', 'dpv', 'curv']:
                         # FreeSurfer curvature format (ASCII or not)
                         for c in curvs:
-                            if   c == 'k1':
+                            if   c == 'k1' and 'kdir1' in curvs:
                                 dirs = curvs['kdir1']
-                            elif c == 'k2':
+                            elif c == 'k2' and 'kdir2' in curvs:
                                 dirs = curvs['kdir2']
                             elif c in ['kdir1', 'kdir2']:
                                 continue

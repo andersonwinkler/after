@@ -477,7 +477,7 @@ def mixed_area(fac, anglesf, vorf):
     return mixv, mixf
 
 # =============================================================================
-def calc_meyer(vtx, fac, vtxn, mixv, progress=False):
+def calc_meyer(vtx, fac, vtxn, mixv, solver='roots', progress=False):
     '''
     Compute curvatures k1 and k2  and principal directions following 
     the algorithm proposed by Meyer et al. (2003).
@@ -488,22 +488,31 @@ def calc_meyer(vtx, fac, vtxn, mixv, progress=False):
         Vextex coordinates.
     fac : NumPy array with 3 columns (int).
         Face indices.
-    vorv : NumPy vector (float)
-        Mixed area per vertex (see paper).
     vtxn : Numpy array with 3 columns (float).
         Vertex normals, unit norm.
+    mixv : NumPy vector (float)
+        Mixed area per vertex (see paper).
+    solver : Compute via least squares ("lsq"), polynomial
+        root finding ("roots"), or None.
+        If None, k1 and k2 are computed analytically from
+        H and K, but this is *less* accurate than using
+        lsq or roots. If None, principal directions will not
+        be returned.
+        Empirical observation:
+        - 'lsq' gives k1 and k2 more accurate for H
+        - 'roots' gives k1 and k2 more accurate for K
 
     Returns
     -------
     k1, k2: NumPy vectors with principal curvatures.
     k1fit, k2fit : NumPy vectors with principal
-        found by least squares fitting.
+        found by least squares fitting or root solving.
     kdir1 : NumPy array with 3 columns (float).
         Direction of curvature k1, found by
-        least squares fitting.
+        least squares fitting or root solving.
     kdir2 : NumPy array with 3 columns (float).
         Direction of curvature k2, found by
-        least squares fitting
+        least squares fitting or root solving.
     '''
     nV = vtx.shape[0]
     
@@ -519,101 +528,143 @@ def calc_meyer(vtx, fac, vtxn, mixv, progress=False):
     # (not to be confused with Gaussian curvature K)
     # This is Eqn.8 from the paper.
     mcnoK = np.zeros((nV,3))
-    np.add.at(mcnoK, fac[:,0], cot[:,1,None] * (vtx[fac[:,0]]-vtx[fac[:,2]]))
-    np.add.at(mcnoK, fac[:,0], cot[:,2,None] * (vtx[fac[:,0]]-vtx[fac[:,1]]))
     np.add.at(mcnoK, fac[:,1], cot[:,0,None] * (vtx[fac[:,1]]-vtx[fac[:,2]]))
-    np.add.at(mcnoK, fac[:,1], cot[:,2,None] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
     np.add.at(mcnoK, fac[:,2], cot[:,0,None] * (vtx[fac[:,2]]-vtx[fac[:,1]]))
+    np.add.at(mcnoK, fac[:,0], cot[:,1,None] * (vtx[fac[:,0]]-vtx[fac[:,2]]))
     np.add.at(mcnoK, fac[:,2], cot[:,1,None] * (vtx[fac[:,2]]-vtx[fac[:,0]]))
+    np.add.at(mcnoK, fac[:,0], cot[:,2,None] * (vtx[fac[:,0]]-vtx[fac[:,1]]))
+    np.add.at(mcnoK, fac[:,1], cot[:,2,None] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
     mcnoK /= (2*mixv[:,None])
     
     # Mean curvature, Eqn.12 (first line)
-    H  = 0.5 * np.sum(mcnoK * vtxn, axis=1)
+    H  = np.sum(mcnoK * vtxn, axis=1)/2
     
-    # Gaussian curvature
-    AD = 2*np.pi - anglesv # angle deficit
+    # Gaussian curvature, Eqn.9 from the paper
+    AD = 2*np.pi - anglesv # angle deficit at each vertex
     K  = AD/mixv
     
     # Principal curvatures
-    D  = np.maximum(H**2 - K, 0)
-    k1 = H + np.sqrt(D)
-    k2 = H - np.sqrt(D)
+    if solver is None:
+        D  = np.maximum(H**2 - K, 0) # conformal Willmore energy, also Möbius invariant
+        k1 = H + np.sqrt(D)
+        k2 = H - np.sqrt(D)
+        curvs = {'k1':k1, 'k2':k2}
+    else:
     
-    # Precompute transforms from the global to local coordinate system of each vertex
-    rotv = np.zeros((3,3,nV))
-    for v in range(nV):
-       rotv[:,:,v] = normal2zaxis(vtxn[v])
-    
-    # Vertex neighbors (1-ring) and cotangents of opposing angles
-    nbrs = [[] for _ in range(nV)] # To store neighbors
-    cots = [[] for _ in range(nV)] # To store the sum of the cotangents of opposite angles
-    cthr = 1/np.tan(np.pi/180)  # We don't want huge or negative cotangents; clip at 90 & 1 degrees
-    for fidx,f in enumerate(fac):
-        idxs = [(0,1,2),(1,2,0),(2,0,1)]
-        for idx in idxs:
-            v, e, o = idx
-            if f[e] in nbrs[f[v]]:
-                idx = nbrs[f[v]].index(f[e])
-                cots[f[v]][idx] += cot[fidx,o]
-            else:
-                nbrs[f[v]].append(f[e])
-                cots[f[v]].append(cot[fidx,o])
-    
-    # Allocate space to store k1, k2, and the directions kd1 and kd2
-    k1fit  = np.zeros(nV)
-    k2fit  = np.zeros(nV)
-    kd1fit = np.zeros((nV,3))
-    kd2fit = np.zeros((nV,3))
-    
-    # Main loop over vertices for the principal directions
-    start_time = time.time()
-    for v in range(nV):
-        if progress:
-            utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+        # Precompute transforms from the global to local coordinate system of each vertex
+        rotv = np.zeros((3,3,nV))
+        for v in range(nV):
+           rotv[:,:,v] = normal2zaxis(vtxn[v])
+           
+        # Vertex neighbors (1-ring) and cotangents of opposing angles
+        nbrs = [[] for _ in range(nV)] # To store neighbors
+        cots = [[] for _ in range(nV)] # To store the sum of the cotangents of opposite angles
+        cthr = 1/np.tan(np.pi/180)  # We don't want huge or negative cotangents; clip at 90 & 1 degrees
+        for fidx,f in enumerate(fac):
+            idxs = [(0,1,2),(1,2,0),(2,0,1)]
+            for idx in idxs:
+                v, e, o = idx
+                if f[e] in nbrs[f[v]]:
+                    idx = nbrs[f[v]].index(f[e])
+                    cots[f[v]][idx] += cot[fidx,o]
+                else:
+                    nbrs[f[v]].append(f[e])
+                    cots[f[v]].append(cot[fidx,o])
+        
+        # Allocate space to store k1, k2, and the directions kd1 and kd2
+        k1fit  = np.zeros(nV)
+        k2fit  = np.zeros(nV)
+        kd1fit = np.zeros((nV,3))
+        kd2fit = np.zeros((nV,3))
+        
+        # Main loop over vertices for the principal directions
+        start_time = time.time()
+        for v in range(nV):
+            if progress:
+                utils.progress_bar(v, nV, start_time, prefix='Processing vertices:', min_update_interval=1)
+                
+            nbrs[v] = list(nbrs[v])
             
-        nbrs[v] = list(nbrs[v])
+            # Estimate of the normal curvature in the direction of each edge
+            # This is the non-numbered equation after Eqn.12, in page 13
+            edg0   = vtx[[v]] - vtx[nbrs[v]]
+            sqnorm = np.linalg.norm(edg0, axis=1, keepdims=True)**2
+            kNij   = 2 * np.sum(edg0*vtxn[[v]], axis=1, keepdims=True) / sqnorm
         
-        # Estimate of the normal curvature in the direction of each edge
-        # This is the non-numbered equation after Eqn.12, in page 13
-        edg0   = vtx[[v]] - vtx[nbrs[v]]
-        sqnorm = np.linalg.norm(edg0, axis=1, keepdims=True)**2
-        kNij   = 2 * np.sum(edg0*vtxn[[v]], axis=1, keepdims=True) / sqnorm
+            # Weights for each edge (top of page 14)
+            wij    = np.array(cots[v])[:,None] * sqnorm / 8 / mixv[v]
+            rtwij  = np.sign(wij) * np.sqrt(np.abs(wij))
+            
+            # Rotate coordinate system so that dij are the unit directions
+            # of the edges in the tangent plane to the current vertex
+            dij = -edg0 @ rotv[:,:,v]
+            dij = dij[:,0:2]/np.linalg.norm(dij[:,0:2], axis=1, keepdims=True) # z coordinate is zero
+            du  = dij[:,[0]]
+            dv  = dij[:,[1]]
+            
+            # Find the coefficients of B (last equation in page 14)
+            M      = rtwij * np.hstack((du**2, 2*du*dv, dv**2))
+            kNij   = rtwij * kNij
+            if solver == 'lsq':
+                # Least squares
+                a,b,c  = np.squeeze(np.linalg.lstsq(M,kNij, rcond=None)[0])
+                
+            elif solver == 'roots':
+                # Find roots of a polynomial
+                # Mean and Gaussian curvatures at this vertex
+                Hi = H[v]
+                Ki = K[v]
+                
+                # Polynomial root finding (4th degree, not 3rd degree)
+                # Rewrite residuals as: r = p*a + q + s/a
+                p = M[:,0] - M[:,1] + M[:,2]
+                q = Hi * (M[:,1] - 2*M[:,2]) - kNij[:,0]
+                s = (Ki + Hi**2) * M[:,2]
     
-        # Weights for each edge (top of page 14)
-        wij    = np.array(cots[v])[:,None] * sqnorm / 8 / mixv[v]
-        rtwij  = np.sign(wij) * np.sqrt(np.abs(wij))
+                # 4th-degree polynomial (c4*a^4 + c3*a^3 + 0*a^2 + c1*a + c0 = 0)
+                c4 =  np.dot(p, p)
+                c3 =  np.dot(p, q)
+                c1 = -np.dot(q, s)
+                c0 = -np.dot(s, s)
+                roots = np.roots([c4, c3, 0, c1, c0]) # roots for a
+                
+                # Keep only real roots where a != 0
+                tol = 1e-10
+                roots = [a.real for a in roots if abs(a.imag) < tol and abs(a.real) > tol]
+                
+                # Best root that minimizes the sum of sq residuals
+                best_ssq = np.inf
+                best_abc = None
+                for a in roots:
+                    b = Hi - a
+                    c = (Ki + b**2) / a
+                    ssq = np.sum((M @ np.array([a, b, c]) - kNij)**2)
+                    if ssq < best_ssq:
+                        best_ssq = ssq
+                        best_abc = (a, b, c)
+                a,b,c = best_abc
+            
+            # Now we can have B. Let's compute principal curvatures and their
+            # directions (i.e., eigenvals and eigenvecs)
+            B = np.array([[a,b],[b,c]])
+            kvals, kdirs = np.linalg.eig(B)
+            
+            # Put back in the global coordinate system, from the vertex local coordinate system
+            kdirs = np.vstack((kdirs, np.zeros((1,2)))).T
+            kdirs = kdirs @ rotv[:,:,v].T
         
-        # Rotate coordinate system so that dij are the unit directions
-        # of the edges in the tangent plane to the current vertex
-        dij = -edg0 @ rotv[:,:,v]
-        dij = dij[:,0:2]/np.linalg.norm(dij[:,0:2], axis=1, keepdims=True) # z coordinate is zero
-        du  = dij[:,[0]]
-        dv  = dij[:,[1]]
-        
-        # Least squares fitting (last equation in page 14)
-        M      = rtwij * np.hstack((du**2, 2*du*dv, dv**2))
-        kNij   = rtwij * kNij
-        a,b,c  = np.squeeze(np.linalg.lstsq(M,kNij, rcond=None)[0])
-        B      = np.array([[a,b],[b,c]])
-        
-        # Compute principal curvatures and their directions (eigenvalues and eigenvectors)
-        kvals, kdirs = np.linalg.eig(B)
-        
-        # Put back in the global coordinate system, from the vertex local coordinate system
-        kdirs = np.vstack((kdirs, np.zeros((1,2)))).T
-        kdirs = kdirs @ rotv[:,:,v].T
+            # Sort in descending order
+            # Meyer says that the fitted k1 and k2 are less accurate.
+            # Working on this code, that doesn't seem to be the case.
+            idx          = np.argsort(kvals)[::-1] 
+            k1fit[v]     = kvals[idx[0]]
+            k2fit[v]     = kvals[idx[1]]
+            kd1fit[v,:]  = kdirs[idx[0],:]
+            kd2fit[v,:]  = kdirs[idx[1],:]
     
-        # Sort in descending order
-        idx          = np.argsort(kvals)[::-1] 
-        k1fit[v]     = kvals[idx[0]]
-        k2fit[v]     = kvals[idx[1]]
-        kd1fit[v,:]  = kdirs[idx[0],:]
-        kd2fit[v,:]  = kdirs[idx[1],:]
-    
-    # Output as a dict that can be expanded with other metrics
-    curvs = {'k1':k1,        'k2':k2,
-             'k1fit':k1fit,  'k2fit':k2fit, # less accurate, top of page 15
-             'kdir1':kd1fit, 'kdir2':kd2fit}
+        # Output as a dict that can be expanded with other metrics
+        curvs = {'k1':k1fit,  'k2':k2fit,
+                 'kdir1':kd1fit, 'kdir2':kd2fit}
     return curvs
 
 # =============================================================================
@@ -806,10 +857,12 @@ def calc_composites(curvs):
     '''
     
     # Gaussian curvature
-    curvs['K']     = curvs['k1']*curvs['k2']
+    if not 'K' in curvs:
+        curvs['K'] = curvs['k1']*curvs['k2']
 
     # Mean curvature, aka Germaine curvature
-    curvs['H']     = (curvs['k1']+curvs['k2'])/2
+    if not 'H' in curvs:
+        curvs['H'] = (curvs['k1']+curvs['k2'])/2
 
     # Gaussian-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Gauss Curvature L^2 Norm (GLN)
@@ -854,13 +907,17 @@ def calc_composites(curvs):
     curvs['C']     = (curvs['k1']**2 + curvs['k2']**2)/2
     
     # Willmore Energy, aka Bending Energy
-    curvs['W']     = curvs['H']**2 - curvs['K']
+    curvs['W']     = curvs['H']**2
+    
+    # Conformal Willmore Energy, Möbius-invariant. Measures how the
+    # mesh departs from umbilicity (plane or sphere have cW=0)
+    curvs['cW']     = curvs['H']**2 - curvs['K']
     
     # Curvedness Index (square root of Casorati curvature)
     curvs['CI']    = np.sqrt(curvs['C'])
     
     # Shape Index
-    curvs['SI']    = 2*np.arctan((curvs['k1']+curvs['k2'])/(curvs['k1']-curvs['k2']))/np.pi
+    curvs['SI']    = 2*np.arctan((curvs['k2']+curvs['k1'])/(curvs['k2']-curvs['k1']))/np.pi
     
     # Extrinsic Curvature Index
     curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
@@ -875,35 +932,36 @@ def calc_globals(vtx, fac, curvs):
     gcurvs['volume'] = calc_full_volume(vtx, fac)
     
     # Isoperimetric Ratio (IPR), aka Isoperimetric Index or Roundness
-    gcurvs['IPR']    = gcurvs['area']/(36*np.pi*gcurvs['volume']**2)**(1/3)
+    gcurvs['IPR']   = gcurvs['area']/(36*np.pi*gcurvs['volume']**2)**(1/3)
     
     # Isomorphy Shape Factor (ISF)
-    gcurvs['ISF']    = gcurvs['area']**(3/2)/gcurvs['volume']
+    gcurvs['ISF']   = gcurvs['area']**(3/2)/gcurvs['volume']
 
-    # Principal curvatures (weighted by area)
-    gcurvs['k1']    = np.sum(curvs['k1']*curvs['voronoi_area'])/gcurvs['area']
-    gcurvs['k2']    = np.sum(curvs['k2']*curvs['voronoi_area'])/gcurvs['area']
+    # Principal curvatures
+    gcurvs['k1']    = np.sum(curvs['k1']*curvs['voronoi_area'])
+    gcurvs['k2']    = np.sum(curvs['k2']*curvs['voronoi_area'])
 
-    # Gaussian curvature. By the Gauss-Bonnet theorem, this should be a constant
-    # equal to 2*pi*EC, where EC = V - E + F is the Euler characteristic
-    gcurvs['K']     = np.sum(curvs['K']*curvs['voronoi_area'])/gcurvs['area']
+    # Gaussian curvature. By the Gauss-Bonnet theorem, this should be 
+    # a constant equal to 2*pi*EC, where EC = V - E + F is the 
+    # Euler characteristic. For a sphere, this is therefore 4*pi
+    gcurvs['K']     = np.sum(curvs['K']*curvs['voronoi_area'])
 
     # Mean curvature
-    gcurvs['H']     = np.sum(curvs['H']*curvs['voronoi_area'])/gcurvs['area']
+    gcurvs['H']     = np.sum(curvs['H']*curvs['voronoi_area'])
 
     # Casorati curvature
-    gcurvs['C']     = np.sum(curvs['C']*curvs['voronoi_area'])/gcurvs['area']
+    gcurvs['C']     = np.sum(curvs['C']*curvs['voronoi_area'])
 
     # Willmore energy, aka Total Bending Energy
-    gcurvs['W']     = np.sum(curvs['H']**2*curvs['voronoi_area'])/gcurvs['area']
+    gcurvs['W']     = np.sum(curvs['W']*curvs['voronoi_area'])
     
-    # If we subtract gcurvs['K'] from W, a sphere will have W = 0
-    gcurvs['W0']    = gcurvs['W'] - gcurvs['K']
+    # Conformal Willmore energy (a sphere or a plane will have cW = 0)
+    gcurvs['cW']    = np.sum(curvs['cW']**2*curvs['voronoi_area'])
     
     # Gyrification Index (GI) or Convexity Ratio (CR)
     from scipy.spatial import ConvexHull
     ch = ConvexHull(vtx)
-    gcurvs['GI']     = gcurvs['area']/ch.area
+    gcurvs['GI']    = gcurvs['area']/ch.area
     return gcurvs
 
 # =============================================================================

@@ -150,7 +150,7 @@ if __name__ == "__main__":
                         areav = vorv
                     
                     print('Computing principal curvatures using the Meyer et al. (2003) method.')
-                    curvs = lib.surf.calc_meyer(vtx, fac, vtxn, areav, solver='roots', progress=progress)
+                    curvs = lib.surf.calc_meyer(vtx, fac, vtxn, areav, solver='lsq', progress=progress)
                     
                     if method.endswith('mixed'):
                         curvs['mixed_area'] = mixv
@@ -170,9 +170,8 @@ if __name__ == "__main__":
                 # vertexwise data is subjected to group-level analyses. Instead is
                 # is better to include the corresponding global measure as a covariate.
                 if normalize:
-                    area = np.sum(vorv)
-                    curvs['k1'] = curvs['k1']*np.sqrt(area)
-                    curvs['k2'] = curvs['k2']*np.sqrt(area)
+                    curvs['k1'] = curvs['k1']*np.sqrt(vorv)
+                    curvs['k2'] = curvs['k2']*np.sqrt(vorv)
                     
                 # Compute composite measures based on k1 and k2
                 print('Computing composite curvatures from the principal curvatures.')
@@ -225,9 +224,9 @@ if __name__ == "__main__":
                     print('Saving results to directory: {}'.format(outdir))
                     os.makedirs(outdir, exist_ok=True)
                     for c in curvs:
-                        if   c == 'k1':
+                        if   c == 'k1' and 'kdir1' in curvs:
                             dirs = curvs['kdir1']
-                        elif c == 'k2':
+                        elif c == 'k2' and 'kdir2' in curvs:
                             dirs = curvs['kdir2']
                         elif c in ['kdir1', 'kdir2']:
                             continue

@@ -477,7 +477,7 @@ def mixed_area(fac, anglesf, vorf):
     return mixv, mixf
 
 # =============================================================================
-def calc_meyer(vtx, fac, vtxn, mixv, solver='roots', progress=False):
+def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
     '''
     Compute curvatures k1 and k2  and principal directions following 
     the algorithm proposed by Meyer et al. (2003).
@@ -492,27 +492,25 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='roots', progress=False):
         Vertex normals, unit norm.
     mixv : NumPy vector (float)
         Mixed area per vertex (see paper).
-    solver : Compute via least squares ("lsq"), polynomial
-        root finding ("roots"), or None.
+        Despite what the paper says, pure Voronoi (not mixed)
+        is better. So, use Voronoi here, not mixed.
+    solver : Compute via least squares ("lsq"), or not (None).
         If None, k1 and k2 are computed analytically from
         H and K, but this is *less* accurate than using
-        lsq or roots. If None, principal directions will not
+        "lsq". If None, principal directions will not
         be returned.
-        Empirical observation:
-        - 'lsq' gives k1 and k2 more accurate for H
-        - 'roots' gives k1 and k2 more accurate for K
 
     Returns
     -------
     k1, k2: NumPy vectors with principal curvatures.
     k1fit, k2fit : NumPy vectors with principal
-        found by least squares fitting or root solving.
+        found by least squares.
     kdir1 : NumPy array with 3 columns (float).
         Direction of curvature k1, found by
-        least squares fitting or root solving.
+        least squares.
     kdir2 : NumPy array with 3 columns (float).
         Direction of curvature k2, found by
-        least squares fitting or root solving.
+        least squares.
     '''
     nV = vtx.shape[0]
     
@@ -549,7 +547,7 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='roots', progress=False):
         k1 = H + np.sqrt(D)
         k2 = H - np.sqrt(D)
         curvs = {'k1':k1, 'k2':k2}
-    else:
+    elif solver == 'lsq':
     
         # Precompute transforms from the global to local coordinate system of each vertex
         rotv = np.zeros((3,3,nV))
@@ -605,45 +603,10 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='roots', progress=False):
             # Find the coefficients of B (last equation in page 14)
             M      = rtwij * np.hstack((du**2, 2*du*dv, dv**2))
             kNij   = rtwij * kNij
-            if solver == 'lsq':
-                # Least squares
-                a,b,c  = np.squeeze(np.linalg.lstsq(M,kNij, rcond=None)[0])
-                
-            elif solver == 'roots':
-                # Find roots of a polynomial
-                # Mean and Gaussian curvatures at this vertex
-                Hi = H[v]
-                Ki = K[v]
-                
-                # Polynomial root finding (4th degree, not 3rd degree)
-                # Rewrite residuals as: r = p*a + q + s/a
-                p = M[:,0] - M[:,1] + M[:,2]
-                q = Hi * (M[:,1] - 2*M[:,2]) - kNij[:,0]
-                s = (Ki + Hi**2) * M[:,2]
-    
-                # 4th-degree polynomial (c4*a^4 + c3*a^3 + 0*a^2 + c1*a + c0 = 0)
-                c4 =  np.dot(p, p)
-                c3 =  np.dot(p, q)
-                c1 = -np.dot(q, s)
-                c0 = -np.dot(s, s)
-                roots = np.roots([c4, c3, 0, c1, c0]) # roots for a
-                
-                # Keep only real roots where a != 0
-                tol = 1e-10
-                roots = [a.real for a in roots if abs(a.imag) < tol and abs(a.real) > tol]
-                
-                # Best root that minimizes the sum of sq residuals
-                best_ssq = np.inf
-                best_abc = None
-                for a in roots:
-                    b = Hi - a
-                    c = (Ki + b**2) / a
-                    ssq = np.sum((M @ np.array([a, b, c]) - kNij)**2)
-                    if ssq < best_ssq:
-                        best_ssq = ssq
-                        best_abc = (a, b, c)
-                a,b,c = best_abc
             
+            # Unconstrained least squares
+            a,b,c  = np.squeeze(np.linalg.lstsq(M,kNij, rcond=None)[0])
+ 
             # Now we can have B. Let's compute principal curvatures and their
             # directions (i.e., eigenvals and eigenvecs)
             B = np.array([[a,b],[b,c]])
@@ -670,7 +633,7 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='roots', progress=False):
 # =============================================================================
 def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
-    Compute curvatures k1 and k2  and principal directions following 
+    Compute curvatures k1 and k2 and principal directions following 
     the algorithm proposed by Rusinkiewicz (2004).
 
     Parameters
@@ -848,6 +811,7 @@ def calc_composites(curvs):
     curvs : dict
         Dictionary containing keys 'k1' and 'k2', with 
         the vertexwise curvatures as NumPy vectors.
+        All other measures will be derived from k1 and k2 alone.
 
     Returns
     -------
@@ -857,14 +821,38 @@ def calc_composites(curvs):
     '''
     
     # Gaussian curvature
-    if not 'K' in curvs:
-        curvs['K'] = curvs['k1']*curvs['k2']
+    curvs['K']     = curvs['k1']*curvs['k2']
 
     # Mean curvature, aka Germaine curvature
-    if not 'H' in curvs:
-        curvs['H'] = (curvs['k1']+curvs['k2'])/2
+    curvs['H']     = (curvs['k1']+curvs['k2'])/2
 
-    # Gaussian-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+    # Mixed:  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    # Casorati curvature
+    curvs['C']     = (curvs['k1']**2 + curvs['k2']**2)/2
+    
+    # Willmore Energy, aka Bending Energy
+    curvs['W']     = curvs['H']**2
+    
+    # Conformal Willmore Energy, Möbius-invariant. Measures how the
+    # mesh departs from umbilicity (plane or sphere have cW=0)
+    curvs['cW']     = curvs['H']**2 - curvs['K']
+    
+    # Shape Index
+    curvs['SI']    = 2*np.arctan((curvs['k2']+curvs['k1'])/(curvs['k2']-curvs['k1']))/np.pi
+    
+    # Curvedness Index (square root of Casorati curvature)
+    curvs['CI']    = np.sqrt(curvs['C'])
+    
+    # Folding Index
+    curvs['FI']    = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
+
+    # Extrinsic Curvature Index
+    curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
+
+    # Curvature difference
+    curvs['kdiff'] = curvs['k1'] - curvs['k2']
+
+    # Gauss-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Gauss Curvature L^2 Norm (GLN)
     curvs['GLN']   = curvs['K']**2
     
@@ -895,32 +883,7 @@ def calc_composites(curvs):
     
     # SH2SH (at the vertex level, identical to AMCI)
     curvs['SH2SH'] = curvs['MLN'] / curvs['AMCI']
-    
-    # Mixed:  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
-    # Curvature difference
-    curvs['kdiff'] = curvs['k1'] - curvs['k2']
-    
-    # Folding Index
-    curvs['FI']    = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
-    
-    # Casorati curvature
-    curvs['C']     = (curvs['k1']**2 + curvs['k2']**2)/2
-    
-    # Willmore Energy, aka Bending Energy
-    curvs['W']     = curvs['H']**2
-    
-    # Conformal Willmore Energy, Möbius-invariant. Measures how the
-    # mesh departs from umbilicity (plane or sphere have cW=0)
-    curvs['cW']     = curvs['H']**2 - curvs['K']
-    
-    # Curvedness Index (square root of Casorati curvature)
-    curvs['CI']    = np.sqrt(curvs['C'])
-    
-    # Shape Index
-    curvs['SI']    = 2*np.arctan((curvs['k2']+curvs['k1'])/(curvs['k2']-curvs['k1']))/np.pi
-    
-    # Extrinsic Curvature Index
-    curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
+
     return curvs
 
 # =============================================================================

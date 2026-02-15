@@ -90,7 +90,7 @@ def normal2zaxis(n):
     return rot
 
 # =============================================================================
-def calc_EC(vtx,fac):
+def calc_EC(vtx, fac):
     '''
     Compute the Euler Characteristic of the mesh, EC = V-E+F.
     For the more general topological definition (EC=V-E+F-P), in this
@@ -142,9 +142,10 @@ def calc_normals(vtx, fac):
         
     # Vertices and edges of each face, their lengths
     tri     = vtx[fac]
-    edges   = tri[:,[2,0,1],:] - tri[:,[1,2,0],:] # a=C-B, b=A-C, c=B-A
-    lengths = np.linalg.norm(edges, axis=2)
-
+    
+    # Edge lengths
+    lengths = calc_lengths(tri)
+    
     # Face normal
     area, fn = signed_area(tri)
 
@@ -166,6 +167,58 @@ def calc_normals(vtx, fac):
     vn  /= np.linalg.norm(vn, axis=1)[:,None]
     fn  /= np.linalg.norm(fn, axis=1)[:,None]
     return vn, fn
+
+# =============================================================================
+def calc_lengths(tri):
+    '''
+    Compute the edge lengths of each face, and the average edge lengths of each
+    face. The input can be created as tri = vtx[fac]
+    '''
+    edges   = tri[:,[2,0,1],:] - tri[:,[1,2,0],:] # a=C-B, b=A-C, c=B-A
+    lengths = np.linalg.norm(edges, axis=2)
+    avglen  = np.mean(lengths, axis=1)
+    return lengths, avglen
+
+# =============================================================================
+def calc_incenters(tri):
+    '''
+    Compute coordinates of the center of the incircle (incenter) for each face.
+    The input can be created as tri = vtx[fac]
+    
+    Parameters
+    ----------
+    tri : NumPy array, num faces by 3 by 3
+        Array of vertex coordinates of each face.
+        First dimension has the face indices (0..numfaces)
+        Second dimension has the vertices ABC
+        Third dimension has the coordinates (x,y,z)
+        Can be created as: tri = vtx[fac]
+    
+    Returns
+    -------
+    icen : NumPy array with 3 columns (float)
+        Incenter coordinates for each face.
+    '''
+    
+    # Edge lengths
+    lengths, _ = calc_lengths(tri)
+    
+    # Edge lengths (opposite sides)
+    a = lengths[:,0,None]
+    b = lengths[:,1,None]
+    c = lengths[:,2,None]
+    
+    # Vertices
+    A = tri[:,0,:]
+    B = tri[:,1,:]
+    C = tri[:,2,:]
+    
+    # Semi-perimeter (actually full perimeter here, but same ratio)
+    perimeter = np.sum(lengths, axis=1, keepdims=True)
+    
+    # Incenter proper (based on Heron formula)
+    icen = (a * A + b * B + c * C) / perimeter
+    return icen
 
 # =============================================================================
 def signed_area(tri, rfn=None):
@@ -368,6 +421,51 @@ def voronoi_area(vtx, fac):
     return vorv, vorf
 
 # =============================================================================
+def calc_relative_area(vtx, fac, fn, ref):
+    '''
+    Compute the areas within a triangle relative to a reference point.
+
+    Parameters
+    ----------
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    fn : NumPy array with 3 columns (float).
+        Face normals, unit norm.
+    ref : NumPy array with 3 columns (float)
+        Reference points P ("centers"), used to subdivide each face into
+        three triangles, the areas of which will be returned.
+
+    Returns
+    -------
+    arear: NumPy array with 3 columns (float).
+        Area of each subtriangle within a face formed by the edge opposite
+        to the current vertex and the reference point.
+        For triangle ABC in fac[f], arear[f] contains the areas of
+        PBC, APC, and ABP, where P is the reference point.
+        If P lies outside the triangle, areas can be negative.
+    '''
+    # Vertices
+    A = vtx[fac[:,0]]
+    B = vtx[fac[:,1]]
+    C = vtx[fac[:,2]]
+
+    # Areas (twice, signed) of each subtriangle
+    cross_PBC = np.cross(B-ref, C-ref)  # PBC (opposite to A)
+    cross_APC = np.cross(C-ref, A-ref)  # APC (opposite to B)
+    cross_ABP = np.cross(A-ref, B-ref)  # ABP (opposite to C)
+
+    # Dot products with face normal
+    dot_PBC = np.sum(cross_PBC * fn, axis=1)
+    dot_APC = np.sum(cross_APC * fn, axis=1)
+    dot_ABP = np.sum(cross_ABP * fn, axis=1)
+
+    # Assemble to the shape of fac
+    arear = np.stack((dot_PBC, dot_APC, dot_ABP), axis=1)/2.0
+    return arear
+
+# =============================================================================
 def calc_angles_old(vtx, fac):
     '''Use the newer one, below, as it's more robust for odd meshes.'''
     tri   = vtx[fac]
@@ -431,6 +529,56 @@ def calc_angles(vtx, fac, eps=1e-15):
     return anglesv, anglesf
 
 # =============================================================================
+def dihedral_angles(fac, fn):
+    '''
+    Compute the internal dihedral angle for each edge of each face.
+    - The mesh must be closed manifold with no boundary.
+    - Every edge is shared by exactly two faces.
+    - Face normals in fn are already unit-length and outwards.
+        
+    Parameters
+    ----------
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    fac : NumPy array with 3 columns (float).
+        Face normals (unit length)
+    
+    Returns
+    -------
+    danglesf :  NumPy array with 3 columns (float).
+        Internal dihedral angle for each edge of each face.
+        For triangles (A,B,C), the opposing edges are (a,b,c).
+    '''
+    
+    # Vertex indices of each edge forming a face
+    edg = np.stack((fac[:,[2,0,1]],fac[:,[1,2,0]]), axis=2) # a=C-B, b=A-C, c=B-A
+    
+    # Populate dict with dihedral angles for each edge
+    da = {}
+    nF  = fac.shape[0]
+    for f in range(nF):
+        for e in range(3):
+            u,v = np.sort(edg[f,e,:])
+            uv = (u,v)
+            # In these well-behaved meshes, we know that each edge has
+            # only two inciding faces (a proper manifold), hence if the entry
+            # already exists, we can proceed to computing the angle
+            if uv in da:
+                da[uv] = np.clip(-np.dot(fn[f], da[uv]), -1.0, 1.0)
+                da[uv] = np.arccos(da[uv])
+            else:
+                da[uv] = fn[f]
+    
+    # Populate new array with dihedral angles
+    danglesf = np.zeros(fac.shape, dtype=float)
+    for f in range(nF):
+        for e in range(3):
+            u,v = np.sort(edg[f,e,:])
+            uv = (u,v)
+            danglesf[f,e] = da[uv]
+    return danglesf
+
+# =============================================================================
 def mixed_area(fac, anglesf, vorf):
     '''
     Compute the "mixed" area, that is, replace the Voronoi area at each
@@ -475,6 +623,10 @@ def mixed_area(fac, anglesf, vorf):
     mixv = np.zeros(nV)
     np.add.at(mixv, fac, mixf)
     return mixv, mixf
+
+# =============================================================================
+def calc_batchelor(vtx, fac, facn):
+    return
 
 # =============================================================================
 def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
@@ -820,70 +972,76 @@ def calc_composites(curvs):
         containing the various composite curvature indices.
     '''
     
+    # Reorder k1 and k2 based on their magnitudes
+    kboth = np.stack((curvs['k1'],curvs['k2'])).T
+    kabs  = np.abs(kboth)
+    idx   = np.argsort(kabs, axis=1)
+    kboth = np.take_along_axis(kboth, idx, axis=1)
+    curvs['kmajor'] = kboth[:,0]
+    curvs['kminor'] = kboth[:,1]
+    
     # Gaussian curvature
-    curvs['K']     = curvs['k1']*curvs['k2']
+    curvs['K']      = curvs['k1']*curvs['k2']
 
     # Mean curvature, aka Germaine curvature
-    curvs['H']     = (curvs['k1']+curvs['k2'])/2
+    curvs['H']      = (curvs['k1']+curvs['k2'])/2
 
-    # Mixed:  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
     # Casorati curvature
-    curvs['C']     = (curvs['k1']**2 + curvs['k2']**2)/2
-    
+    curvs['C']      = (curvs['k1']**2 + curvs['k2']**2)/2
+
     # Willmore Energy, aka Bending Energy
-    curvs['W']     = curvs['H']**2
+    curvs['W']      = curvs['H']**2
     
     # Conformal Willmore Energy, Möbius-invariant. Measures how the
     # mesh departs from umbilicity (plane or sphere have cW=0)
     curvs['cW']     = curvs['H']**2 - curvs['K']
     
     # Shape Index
-    curvs['SI']    = 2*np.arctan((curvs['k2']+curvs['k1'])/(curvs['k2']-curvs['k1']))/np.pi
-    
-    # Curvedness Index (square root of Casorati curvature)
-    curvs['CI']    = np.sqrt(curvs['C'])
-    
+    curvs['SI']     = 2*np.arctan((curvs['k2']+curvs['k1'])/(curvs['k2']-curvs['k1']))/np.pi
+
     # Folding Index
-    curvs['FI']    = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
-
-    # Extrinsic Curvature Index
-    curvs['ECI']   = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
-
-    # Curvature difference
-    curvs['kdiff'] = curvs['k1'] - curvs['k2']
+    curvs['FI']     = np.absolute(curvs['k1']) * (np.absolute(curvs['k1']) - np.absolute(curvs['k2']))
 
     # Gauss-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Gauss Curvature L^2 Norm (GLN)
-    curvs['GLN']   = curvs['K']**2
+    curvs['GLN']    = curvs['K']**2
     
     # Intrinsic Curvature Index (ICI, NICI, AICI)
-    curvs['ICI']   = np.maximum(curvs['K'],0)
-    curvs['NICI']  = np.minimum(curvs['K'],0) # Negative version
-    curvs['AICI']  = np.absolute(curvs['K'])  # Absolute version
+    curvs['ICI']    = np.maximum(curvs['K'],0)
+    curvs['NICI']   = np.minimum(curvs['K'],0) # Negative version
+    curvs['AICI']   = np.absolute(curvs['K'])  # Absolute version
     
     # Area Fraction of Intrinsic Curvature Index
-    curvs['FICI']  = (curvs['K'] > 0).astype(float)
-    curvs['FNICI'] = (curvs['K'] < 0).astype(float)
+    curvs['FICI']   = (curvs['K'] > 0).astype(float)
+    curvs['FNICI']  = (curvs['K'] < 0).astype(float)
     
     # SK2SK (at the vertex level, identical to AICI)
-    curvs['SK2SK'] = curvs['GLN'] / curvs['AICI']
+    curvs['SK2SK']  = curvs['GLN'] / curvs['AICI']
     
     # Mean-related: - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
     # Mean Curvature L^2 Norm (MLN)
-    curvs['MLN']   = curvs['H']**2
+    curvs['MLN']    = curvs['H']**2
     
     # Mean Curvature Index (MCI, NMCI, AMCI)
-    curvs['MCI']   = np.maximum(curvs['H'],0)
-    curvs['NMCI']  = np.minimum(curvs['H'],0) # Negative version
-    curvs['AMCI']  = np.absolute(curvs['H'])  # Absolute version
+    curvs['MCI']    = np.maximum(curvs['H'],0)
+    curvs['NMCI']   = np.minimum(curvs['H'],0) # Negative version
+    curvs['AMCI']   = np.absolute(curvs['H'])  # Absolute version
 
     # Area Fraction of Mean Curvature Index
-    curvs['FMCI']  = (curvs['H'] > 0).astype(float)
-    curvs['FNMCI'] = (curvs['H'] < 0).astype(float)
+    curvs['FMCI']   = (curvs['H'] > 0).astype(float)
+    curvs['FNMCI']  = (curvs['H'] < 0).astype(float)
     
     # SH2SH (at the vertex level, identical to AMCI)
-    curvs['SH2SH'] = curvs['MLN'] / curvs['AMCI']
+    curvs['SH2SH']  = curvs['MLN'] / curvs['AMCI']
+    
+    # Mixed:  - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+    # Extrinsic Curvature Index
+    curvs['ECI']    = curvs['H']*np.sqrt(curvs['H']**2 - curvs['K'])
 
+    # Curvature differences
+    curvs['k1-k2']             = curvs['k1'] - curvs['k2']
+    curvs['kmajor-kminor']     = curvs['kmajor'] - curvs['kminor']
+    curvs['magmajor-magminor'] = np.abs(curvs['kmajor']) - np.abs(curvs['kminor'])
     return curvs
 
 # =============================================================================
@@ -894,49 +1052,44 @@ def calc_globals(vtx, fac, curvs):
     gcurvs['area']   = np.sum(curvs['voronoi_area'])
     gcurvs['volume'] = calc_full_volume(vtx, fac)
     
-    # Isoperimetric Ratio (IPR), aka Isoperimetric Index or Roundness
+    # Isoperimetric Ratio (IPR), aka Isoperimetric Index
     gcurvs['IPR']   = gcurvs['area']/(36*np.pi*gcurvs['volume']**2)**(1/3)
+    
+    # Sphericity
+    gcurvs['S']     = 1/gcurvs['IPR']
+    
+    # Folding Ratio
+    gcurvs['FR']    = np.log(gcurvs['IPR'])
     
     # Isomorphy Shape Factor (ISF)
     gcurvs['ISF']   = gcurvs['area']**(3/2)/gcurvs['volume']
 
-    # Principal curvatures
-    gcurvs['k1']    = np.sum(curvs['k1']*curvs['voronoi_area'])
-    gcurvs['k2']    = np.sum(curvs['k2']*curvs['voronoi_area'])
-
-    # Gaussian curvature. By the Gauss-Bonnet theorem, this should be 
-    # a constant equal to 2*pi*EC, where EC = V - E + F is the 
-    # Euler characteristic. For a sphere, this is therefore 4*pi
-    gcurvs['K']     = np.sum(curvs['K']*curvs['voronoi_area'])
-
-    # Mean curvature
-    gcurvs['H']     = np.sum(curvs['H']*curvs['voronoi_area'])
-
-    # Casorati curvature
-    gcurvs['C']     = np.sum(curvs['C']*curvs['voronoi_area'])
-
-    # Willmore energy, aka Total Bending Energy
-    gcurvs['W']     = np.sum(curvs['W']*curvs['voronoi_area'])
-    
-    # Conformal Willmore energy (a sphere or a plane will have cW = 0)
-    gcurvs['cW']    = np.sum(curvs['cW']**2*curvs['voronoi_area'])
-    
     # Gyrification Index (GI) or Convexity Ratio (CR)
     from scipy.spatial import ConvexHull
     ch = ConvexHull(vtx)
     gcurvs['GI']    = gcurvs['area']/ch.area
-    return gcurvs
 
-# =============================================================================
-def avg_edge_len_per_face(tri):
-    '''
-    Compute the average edge length of each face.
-    The input can be created as tri = vtx[fac]
-    '''
-    edges  = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
-    avglen = np.sqrt(np.sum(edges**2, axis=2))
-    avglen = np.mean(avglen, axis=1)
-    return avglen
+    # Principal curvatures
+    gcurvs['k1']    = np.sum(curvs['k1'])
+    gcurvs['k2']    = np.sum(curvs['k2'])
+
+    # Gaussian curvature. By the Gauss-Bonnet theorem, this should be 
+    # a constant equal to 2*pi*EC, where EC = V - E + F is the 
+    # Euler characteristic. For a sphere, this is therefore 4*pi
+    gcurvs['K']     = np.sum(curvs['K'])
+
+    # Mean curvature
+    gcurvs['H']     = np.sum(curvs['H'])
+
+    # Casorati curvature
+    gcurvs['C']     = np.sum(curvs['C'])
+
+    # Willmore energy, aka Total Bending Energy
+    gcurvs['W']     = np.sum(curvs['W'])
+    
+    # Conformal Willmore energy (a sphere or a plane will have cW = 0)
+    gcurvs['cW']    = np.sum(curvs['cW']**2)
+    return gcurvs
 
 # =============================================================================
 def calc_fd(vtx, fac, fsmode=True):
@@ -963,7 +1116,7 @@ def calc_fd(vtx, fac, fsmode=True):
     # Area per face and avg edge length in the original resolution
     tri1   = vtx[fac]
     area1  = signed_area(tri1)[0]
-    e1     = avg_edge_len_per_face(tri1)
+    _, e1  = calc_lengths(tri1)
   
     # Downsample these scalars (measured in original resolution)
     area1d = platonic.dpxdown(area1, 1, fsmode=True)
@@ -978,13 +1131,13 @@ def calc_fd(vtx, fac, fsmode=True):
     # Area per face and avg edge length of downsampled surface
     tri0   = vtx0[fac0]
     area0  = signed_area(tri0)[0]
-    e0     = avg_edge_len_per_face(tri0)
+    _, e0  = calc_lengths(tri0)
     
     # Measure area in terms of edge lengths
     N0     = area0/e0/e0
     
     # Fractal dimension, per downsampled face
-    D = -np.log(N1d/N0)/np.log(e1d/e0)
+    D      = -np.log(N1d/N0)/np.log(e1d/e0)
     return D
 
 # =============================================================================

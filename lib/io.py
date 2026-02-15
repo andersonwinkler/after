@@ -37,6 +37,10 @@ def read_surf(filein, is_ascii=False):
         stamp = None
     else:
         vtx, fac, info, stamp = nib.freesurfer.read_geometry(filein, read_metadata=True, read_stamp=True)
+    
+    # Sane datatypes
+    vtx = np.asarray(vtx, dtype=float)
+    fac = np.asarray(fac, dtype=int)
     return vtx, fac, info, stamp
 
 # -----------------------------------------------------------------------------

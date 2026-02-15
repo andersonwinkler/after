@@ -131,9 +131,9 @@ def calc_normals(vtx, fac):
 
     Returns
     -------
-    vn : NumPy array with 3 columns (float).
+    vtxn : NumPy array with 3 columns (float).
         Vertex normals.
-    fn : NumPy array with 3 columns (float).
+    facn : NumPy array with 3 columns (float).
         Face normals.
     '''
     
@@ -147,7 +147,7 @@ def calc_normals(vtx, fac):
     lengths = calc_lengths(tri)
     
     # Face normal
-    area, fn = signed_area(tri)
+    area, facn = signed_area(tri)
 
     # Weights -- Simplified, faster, same results as Max (1999)
     cA = area / (lengths[:,1] * lengths[:,2]) ** 2 # (b*c)^2
@@ -156,17 +156,17 @@ def calc_normals(vtx, fac):
 
     # Accumulate weighted face normal contributions
     # thus avoiding to iterate over vertices
-    vn = np.zeros((nV,3))
-    np.add.at(vn, fac[:,0], cA[:,None] * fn)
-    np.add.at(vn, fac[:,1], cB[:,None] * fn)
-    np.add.at(vn, fac[:,2], cC[:,None] * fn)
+    vtxn = np.zeros((nV,3))
+    np.add.at(vtxn, fac[:,0], cA[:,None] * facn)
+    np.add.at(vtxn, fac[:,1], cB[:,None] * facn)
+    np.add.at(vtxn, fac[:,2], cC[:,None] * facn)
 
     # Normalize normals to unit.
     # You may opt to comment out to take into account transitions
     # e.g., from positive to negative.
-    vn  /= np.linalg.norm(vn, axis=1)[:,None]
-    fn  /= np.linalg.norm(fn, axis=1)[:,None]
-    return vn, fn
+    vtxn  /= np.linalg.norm(vtxn, axis=1)[:,None]
+    facn  /= np.linalg.norm(facn, axis=1)[:,None]
+    return vtxn, facn
 
 # =============================================================================
 def calc_lengths(tri):
@@ -178,6 +178,29 @@ def calc_lengths(tri):
     lengths = np.linalg.norm(edges, axis=2)
     avglen  = np.mean(lengths, axis=1)
     return lengths, avglen
+
+# =============================================================================
+def calc_barycenters(tri):
+    '''
+    Compute coordinates of the barycenter for each face.
+    The input can be created as tri = vtx[fac]
+    
+    Parameters
+    ----------
+    tri : NumPy array, num faces by 3 by 3
+        Array of vertex coordinates of each face.
+        First dimension has the face indices (0..numfaces)
+        Second dimension has the vertices ABC
+        Third dimension has the coordinates (x,y,z)
+        Can be created as: tri = vtx[fac]
+    
+    Returns
+    -------
+    bary : NumPy array with 3 columns (float)
+        Barycenter coordinates for each face.
+    '''
+    bary = np.mean(tri, axis=1)
+    return bary
 
 # =============================================================================
 def calc_incenters(tri):
@@ -247,14 +270,59 @@ def signed_area(tri, rfn=None):
 
     '''
     edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:] # a=C-B, b=A-C, c=B-A
-    fn    = np.cross(edges[:,1,:], edges[:,2,:], axis=1) # b and c
-    area  = np.linalg.norm(fn, axis=1) / 2.0
+    facn  = np.cross(edges[:,1,:], edges[:,2,:], axis=1) # b and c
+    area  = np.linalg.norm(facn, axis=1) / 2.0
     idx   = area != 0
-    fn[idx,:] /= np.linalg.norm(fn[idx,:], axis=1)[:,None]
+    facn[idx,:] /= np.linalg.norm(facn[idx,:], axis=1)[:,None]
     if rfn is not None:
-        sgn   = np.sign(np.sum(fn * rfn, axis=1))
+        sgn   = np.sign(np.sum(facn * rfn, axis=1))
         area *= sgn
-    return area, fn
+    return area, facn
+
+# =============================================================================
+def calc_relative_area(vtx, fac, fn, ref):
+    '''
+    Compute the areas within a triangle relative to a reference point.
+
+    Parameters
+    ----------
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    fn : NumPy array with 3 columns (float).
+        Face normals, unit norm.
+    ref : NumPy array with 3 columns (float)
+        Reference points P ("centers"), used to subdivide each face into
+        three triangles, the areas of which will be returned.
+
+    Returns
+    -------
+    arear: NumPy array with 3 columns (float).
+        Area of each subtriangle within a face formed by the edge opposite
+        to the current vertex and the reference point.
+        For triangle ABC in fac[f], arear[f] contains the areas of
+        PBC, APC, and ABP, where P is the reference point.
+        If P lies outside the triangle, areas can be negative.
+    '''
+    # Vertices
+    A = vtx[fac[:,0]]
+    B = vtx[fac[:,1]]
+    C = vtx[fac[:,2]]
+
+    # Areas (twice, signed) of each subtriangle
+    cross_PBC = np.cross(B-ref, C-ref)  # PBC (opposite to A)
+    cross_APC = np.cross(C-ref, A-ref)  # APC (opposite to B)
+    cross_ABP = np.cross(A-ref, B-ref)  # ABP (opposite to C)
+
+    # Dot products with face normal
+    dot_PBC = np.sum(cross_PBC * fn, axis=1)
+    dot_APC = np.sum(cross_APC * fn, axis=1)
+    dot_ABP = np.sum(cross_ABP * fn, axis=1)
+
+    # Assemble to the shape of fac
+    arear = np.stack((dot_PBC, dot_APC, dot_ABP), axis=1)/2.0
+    return arear
 
 # =============================================================================
 def voronoi_area(vtx, fac):
@@ -421,49 +489,50 @@ def voronoi_area(vtx, fac):
     return vorv, vorf
 
 # =============================================================================
-def calc_relative_area(vtx, fac, fn, ref):
+def mixed_area(fac, anglesf, vorf):
     '''
-    Compute the areas within a triangle relative to a reference point.
+    Compute the "mixed" area, that is, replace the Voronoi area at each
+    obtuse vertex of a face by area/2, and the area of the remaining
+    two vertices with area/4.
+    Faces that are not obtuse remain unchanged. This is used to compute
+    curvatures using the Meyer et al. (2003) method.
 
     Parameters
     ----------
-    vtx : NumPy array with 3 columns (float).
-        Vextex coordinates.
     fac : NumPy array with 3 columns (int).
         Face indices.
-    fn : NumPy array with 3 columns (float).
-        Face normals, unit norm.
-    ref : NumPy array with 3 columns (float)
-        Reference points P ("centers"), used to subdivide each face into
-        three triangles, the areas of which will be returned.
+    anglesf : NumPy array, num faces by 3 (float).
+        Angle at each vertex of a face.
+    vorf : NumPy array with 3 columns (float).
+        Voronoi area per vertex per face.
 
     Returns
     -------
-    arear: NumPy array with 3 columns (float).
-        Area of each subtriangle within a face formed by the edge opposite
-        to the current vertex and the reference point.
-        For triangle ABC in fac[f], arear[f] contains the areas of
-        PBC, APC, and ABP, where P is the reference point.
-        If P lies outside the triangle, areas can be negative.
+    vorv : NumPy vector (float)
+        Mixed area per vertex.
+    vorf : NumPy array with 3 columns (float).
+        Mixed area per vertex per face.
     '''
-    # Vertices
-    A = vtx[fac[:,0]]
-    B = vtx[fac[:,1]]
-    C = vtx[fac[:,2]]
-
-    # Areas (twice, signed) of each subtriangle
-    cross_PBC = np.cross(B-ref, C-ref)  # PBC (opposite to A)
-    cross_APC = np.cross(C-ref, A-ref)  # APC (opposite to B)
-    cross_ABP = np.cross(A-ref, B-ref)  # ABP (opposite to C)
-
-    # Dot products with face normal
-    dot_PBC = np.sum(cross_PBC * fn, axis=1)
-    dot_APC = np.sum(cross_APC * fn, axis=1)
-    dot_ABP = np.sum(cross_ABP * fn, axis=1)
-
-    # Assemble to the shape of fac
-    arear = np.stack((dot_PBC, dot_APC, dot_ABP), axis=1)/2.0
-    return arear
+    # Area per face
+    farea = np.sum(vorf, axis=1)
+    
+    # Indices of obtuse angles
+    aidx = anglesf > np.pi/2
+    
+    # Indices of obtuse faces
+    fidx = np.any(aidx, axis=1)
+    
+    # First populate all angles in obtuse faces with area/4
+    # then update the obtuse angles with area/2
+    mixf = vorf
+    mixf[fidx,:] = farea[fidx,None]/4
+    mixf[aidx]   = farea[fidx]/2
+    
+    # Accumulate vertex mixed areas for faces that meet at that vertex
+    nV   = np.max(fac)+1
+    mixv = np.zeros(nV)
+    np.add.at(mixv, fac, mixf)
+    return mixv, mixf
 
 # =============================================================================
 def calc_angles_old(vtx, fac):
@@ -529,7 +598,7 @@ def calc_angles(vtx, fac, eps=1e-15):
     return anglesv, anglesf
 
 # =============================================================================
-def dihedral_angles(fac, fn):
+def dihedral_angles(fac, facn):
     '''
     Compute the internal dihedral angle for each edge of each face.
     - The mesh must be closed manifold with no boundary.
@@ -540,7 +609,7 @@ def dihedral_angles(fac, fn):
     ----------
     fac : NumPy array with 3 columns (int).
         Face indices.
-    fac : NumPy array with 3 columns (float).
+    facn : NumPy array with 3 columns (float).
         Face normals (unit length)
     
     Returns
@@ -564,10 +633,10 @@ def dihedral_angles(fac, fn):
             # only two inciding faces (a proper manifold), hence if the entry
             # already exists, we can proceed to computing the angle
             if uv in da:
-                da[uv] = np.clip(-np.dot(fn[f], da[uv]), -1.0, 1.0)
+                da[uv] = np.clip(-np.dot(facn[f], da[uv]), -1.0, 1.0)
                 da[uv] = np.arccos(da[uv])
             else:
-                da[uv] = fn[f]
+                da[uv] = facn[f]
     
     # Populate new array with dihedral angles
     danglesf = np.zeros(fac.shape, dtype=float)
@@ -579,60 +648,73 @@ def dihedral_angles(fac, fn):
     return danglesf
 
 # =============================================================================
-def mixed_area(fac, anglesf, vorf):
+def calc_castellanosmith(vtx, fac, facn, vorv):
     '''
-    Compute the "mixed" area, that is, replace the Voronoi area at each
-    obtuse vertex of a face by area/2, and the area of the remaining
-    two vertices with area/4.
-    Faces that are not obtuse remain unchanged. This is used to compute
-    curvatures using the Meyer et al. (2003) method.
+    Compute principal curvatures k1 and k2 following the algorithm
+    proposed by Castellano Smith (1999).
+    
+    This will not return principal directions.
 
     Parameters
     ----------
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
     fac : NumPy array with 3 columns (int).
         Face indices.
-    anglesf : NumPy array, num faces by 3 (float).
-        Angle at each vertex of a face.
-    vorf : NumPy array with 3 columns (float).
-        Voronoi area per vertex per face.
+    facn : NumPy array with 3 columns (float).
+        Face normals (unit length)
+    vorv : NumPy vector (float)
+        Voronoi area per vertex.
 
     Returns
     -------
-    vorv : NumPy vector (float)
-        Mixed area per vertex.
-    vorf : NumPy array with 3 columns (float).
-        Mixed area per vertex per face.
-    '''
-    # Area per face
-    farea = np.sum(vorf, axis=1)
-    
-    # Indices of obtuse angles
-    aidx = anglesf > np.pi/2
-    
-    # Indices of obtuse faces
-    fidx = np.any(aidx, axis=1)
-    
-    # First populate all angles in obtuse faces with area/4
-    # then update the obtuse angles with area/2
-    mixf = vorf
-    mixf[fidx,:] = farea[fidx,None]/4
-    mixf[aidx]   = farea[fidx]/2
-    
-    # Accumulate vertex mixed areas for faces that meet at that vertex
-    nV   = np.max(fac)+1
-    mixv = np.zeros(nV)
-    np.add.at(mixv, fac, mixf)
-    return mixv, mixf
+    curvs : dict with keys:
+            k1, k2: NumPy vectors with principal curvatures.
 
-# =============================================================================
-def calc_batchelor(vtx, fac, facn):
-    return
+    '''
+    # Vertex coordinates per face
+    tri   = vtx[fac]
+    
+    # Edge lengths and dihedral angles
+    lengths, _ = calc_lengths(tri)
+    danglesf   = dihedral_angles(fac, facn)
+
+    # Areas of the subtriangles defined by the incenter
+    icen  = calc_incenters(tri)
+    arear = calc_relative_area(vtx, fac, facn, icen)
+    
+    # Germain curvature at each edge
+    He    = lengths * danglesf / arear
+    
+    # Germain curvature at each vertex
+    H = np.zeros(vtx.shape[0])
+    np.add.at(H, fac[0], He[:,1])
+    np.add.at(H, fac[0], He[:,2])
+    np.add.at(H, fac[1], He[:,2])
+    np.add.at(H, fac[1], He[:,0])
+    np.add.at(H, fac[2], He[:,0])
+    np.add.at(H, fac[2], He[:,1])
+    
+    # Angles of each vertex of each face (anglesf) and sum of angles
+    # at each vertex (anglesv)
+    anglesv, anglesf = calc_angles(vtx, fac)
+    
+    # Gaussian curvature
+    AD    = 2*np.pi - anglesv # angle deficit at each vertex
+    K     = AD/vorv
+    
+    # Solve k1 and k2
+    D     = np.maximum(H**2 - K, 0) # conformal Willmore energy, also Möbius invariant
+    k1    = H + np.sqrt(D)
+    k2    = H - np.sqrt(D)
+    curvs = {'k1':k1, 'k2':k2}
+    return curvs
 
 # =============================================================================
 def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
     '''
-    Compute curvatures k1 and k2  and principal directions following 
-    the algorithm proposed by Meyer et al. (2003).
+    Compute principal curvatures k1 and k2 and principal directions
+    following the algorithm proposed by Meyer et al. (2003).
 
     Parameters
     ----------
@@ -654,15 +736,16 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
 
     Returns
     -------
-    k1, k2: NumPy vectors with principal curvatures.
-    k1fit, k2fit : NumPy vectors with principal
-        found by least squares.
-    kdir1 : NumPy array with 3 columns (float).
-        Direction of curvature k1, found by
-        least squares.
-    kdir2 : NumPy array with 3 columns (float).
-        Direction of curvature k2, found by
-        least squares.
+    curvs : dict with keys:
+            k1, k2: NumPy vectors with principal curvatures.
+            k1fit, k2fit : NumPy vectors with principal
+                found by least squares.
+            kdir1 : NumPy array with 3 columns (float).
+                Direction of curvature k1, found by
+                least squares.
+            kdir2 : NumPy array with 3 columns (float).
+                Direction of curvature k2, found by
+                least squares.
     '''
     nV = vtx.shape[0]
     
@@ -674,7 +757,7 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
     cthr = 1/np.tan(np.pi/180)
     cot = np.clip(np.cos(anglesf)/np.sin(anglesf),-cthr,cthr)
     
-    # Populate the mean curvature normal operator K, i.e., K(x_i)
+    # Populate the Germain curvature normal operator K, i.e., K(x_i)
     # (not to be confused with Gaussian curvature K)
     # This is Eqn.8 from the paper.
     mcnoK = np.zeros((nV,3))
@@ -686,7 +769,7 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
     np.add.at(mcnoK, fac[:,1], cot[:,2,None] * (vtx[fac[:,1]]-vtx[fac[:,0]]))
     mcnoK /= (2*mixv[:,None])
     
-    # Mean curvature, Eqn.12 (first line)
+    # Germain curvature, Eqn.12 (first line)
     H  = np.sum(mcnoK * vtxn, axis=1)/2
     
     # Gaussian curvature, Eqn.9 from the paper
@@ -785,8 +868,8 @@ def calc_meyer(vtx, fac, vtxn, mixv, solver='lsq', progress=False):
 # =============================================================================
 def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     '''
-    Compute curvatures k1 and k2 and principal directions following 
-    the algorithm proposed by Rusinkiewicz (2004).
+    Compute principal curvatures k1 and k2 and principal directions 
+    following the algorithm proposed by Rusinkiewicz (2004).
 
     Parameters
     ----------
@@ -803,16 +886,17 @@ def calc_rusinkiewicz(vtx, fac, vtxn, facn, vorv, vorf, progress=False):
     vorf : NumPy array with 3 columns (float).
         Voronoi area per vertex per face.
 
-    Returns (as a dictionary)
+    Returns
     -------
-    k1 : NumPy vector (float)
-        Curvature k1.
-    k2 : NumPy vector (float)
-        Curvature k2.
-    kdir1 : NumPy array with 3 columns (float).
-        Direction of curvature k1.
-    kdir2 : NumPy array with 3 columns (float).
-        Direction of curvature k2.
+    curvs : dict with keys:
+            k1 : NumPy vector (float)
+                Curvature k1.
+            k2 : NumPy vector (float)
+                Curvature k2.
+            kdir1 : NumPy array with 3 columns (float).
+                Direction of curvature k1.
+            kdir2 : NumPy array with 3 columns (float).
+                Direction of curvature k2.
     '''
     
     # Number of vertices and faces
@@ -983,7 +1067,7 @@ def calc_composites(curvs):
     # Gaussian curvature
     curvs['K']      = curvs['k1']*curvs['k2']
 
-    # Mean curvature, aka Germaine curvature
+    # Germain curvature, aka mean curvature
     curvs['H']      = (curvs['k1']+curvs['k2'])/2
 
     # Casorati curvature
@@ -1078,7 +1162,7 @@ def calc_globals(vtx, fac, curvs):
     # Euler characteristic. For a sphere, this is therefore 4*pi
     gcurvs['K']     = np.sum(curvs['K'])
 
-    # Mean curvature
+    # Germain curvature, aka mean curvature
     gcurvs['H']     = np.sum(curvs['H'])
 
     # Casorati curvature

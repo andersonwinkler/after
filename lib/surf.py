@@ -144,7 +144,7 @@ def calc_normals(vtx, fac):
     tri     = vtx[fac]
     
     # Edge lengths
-    lengths = calc_lengths(tri)
+    lengths, _ = calc_lengths(tri)
     
     # Face normal
     area, facn = signed_area(tri)
@@ -219,7 +219,7 @@ def calc_incenters(tri):
     
     Returns
     -------
-    icen : NumPy array with 3 columns (float)
+    incen : NumPy array with 3 columns (float)
         Incenter coordinates for each face.
     '''
     
@@ -240,8 +240,8 @@ def calc_incenters(tri):
     perimeter = np.sum(lengths, axis=1, keepdims=True)
     
     # Incenter proper (based on Heron formula)
-    icen = (a * A + b * B + c * C) / perimeter
-    return icen
+    incen = (a * A + b * B + c * C) / perimeter
+    return incen
 
 # =============================================================================
 def signed_area(tri, rfn=None):
@@ -280,7 +280,7 @@ def signed_area(tri, rfn=None):
     return area, facn
 
 # =============================================================================
-def calc_relative_area(vtx, fac, fn, ref):
+def calc_relative_area(vtx, fac, facn, ref):
     '''
     Compute the areas within a triangle relative to a reference point.
 
@@ -316,9 +316,9 @@ def calc_relative_area(vtx, fac, fn, ref):
     cross_ABP = np.cross(A-ref, B-ref)  # ABP (opposite to C)
 
     # Dot products with face normal
-    dot_PBC = np.sum(cross_PBC * fn, axis=1)
-    dot_APC = np.sum(cross_APC * fn, axis=1)
-    dot_ABP = np.sum(cross_ABP * fn, axis=1)
+    dot_PBC = np.sum(cross_PBC * facn, axis=1)
+    dot_APC = np.sum(cross_APC * facn, axis=1)
+    dot_ABP = np.sum(cross_ABP * facn, axis=1)
 
     # Assemble to the shape of fac
     arear = np.stack((dot_PBC, dot_APC, dot_ABP), axis=1)/2.0
@@ -535,17 +535,60 @@ def mixed_area(fac, anglesf, vorf):
     return mixv, mixf
 
 # =============================================================================
-def calc_angles_old(vtx, fac):
-    '''Use the newer one, below, as it's more robust for odd meshes.'''
-    tri   = vtx[fac]
-    edges = tri[:,[2,0,1],:] - tri[:,[1,2,0],:]
-    L     = np.linalg.norm(edges, axis=2)
-    cos   = (L[:,[1,0,0]]**2 + L[:,[2,2,1]]**2 - L**2) / 2 / L[:,[1,0,0]] / L[:,[2,2,1]]
-    cos   = np.clip(cos, -1.0, 1.0)
-    anglesf = np.arccos(cos)
-    anglesv = np.zeros(vtx.shape[0])
-    np.add.at(anglesv, fac, anglesf)
-    return anglesv, anglesf
+def edge_areas(vtx, fac, inarea):
+    '''
+    Compute area per edge within a face
+    
+    Parameters
+    ----------
+    vtx : NumPy array with 3 columns (float).
+        Vextex coordinates.
+    fac : NumPy array with 3 columns (int).
+        Face indices.
+    inarea : NumPy array with 3 columns (float).
+        Area for each subtriangle within a face
+        formed by replacement of the corresponding vertex
+        by the incenter (center of the inscribed cicumference)
+    
+    Returns
+    -------
+    eareasf : NumPy array with 3 columns (float).
+        Area of each edge, facewise (a,b,c), which oppose vertices (A,B,C).
+        The sum per face is greater than the area per face as in includes the
+        area closest to the edge from the neighboring triangle.
+    
+    To compute inarea:
+    tri    = vtx[fac]
+    incen  = calc_incenters(tri)
+    inarea = calc_relative_area(vtx, fac, facn, incen)
+    '''
+    
+    # Vertex indices of each edge forming a face
+    edg = np.stack((fac[:,[2,0,1]],fac[:,[1,2,0]]), axis=2) # a=C-B, b=A-C, c=B-A
+    
+    # Populate dict with edge areas
+    ea = {}
+    nF  = fac.shape[0]
+    for f in range(nF):
+        for e in range(3):
+            u,v = np.sort(edg[f,e,:])
+            uv = (u,v)
+            # In these well-behaved meshes, we know that each edge has
+            # only two inciding faces (a proper manifold), hence if the entry
+            # already exists, we can proceed to computing incremening the area
+            if uv in ea:
+                ea[uv] += inarea[f,e]
+            else:
+                ea[uv]  = inarea[f,e]
+    
+    # Populate new array with edge areas
+    eareasf = np.zeros(fac.shape, dtype=float)
+    for f in range(nF):
+        for e in range(3):
+            u,v = np.sort(edg[f,e,:])
+            uv = (u,v)
+            eareasf[f,e] = ea[uv]
+    return eareasf
 
 # =============================================================================
 def calc_angles(vtx, fac, eps=1e-15):
@@ -598,13 +641,14 @@ def calc_angles(vtx, fac, eps=1e-15):
     return anglesv, anglesf
 
 # =============================================================================
-def dihedral_angles(fac, facn):
+def calc_dihedral(fac, facn, progress=False):
     '''
-    Compute the internal dihedral angle for each edge of each face.
-    - The mesh must be closed manifold with no boundary.
+    Compute the angle between normals for each edge of each face.
+    - The mesh must be a closed manifold with no boundary.
     - Every edge is shared by exactly two faces.
     - Face normals in fn are already unit-length and outwards.
-        
+    This is is the same as pi minus the internal dihedral angle.
+    
     Parameters
     ----------
     fac : NumPy array with 3 columns (int).
@@ -615,7 +659,7 @@ def dihedral_angles(fac, facn):
     Returns
     -------
     danglesf :  NumPy array with 3 columns (float).
-        Internal dihedral angle for each edge of each face.
+        Dihedral angle for each edge of each face.
         For triangles (A,B,C), the opposing edges are (a,b,c).
     '''
     
@@ -625,15 +669,20 @@ def dihedral_angles(fac, facn):
     # Populate dict with dihedral angles for each edge
     da = {}
     nF  = fac.shape[0]
+    start_time = time.time()
     for f in range(nF):
+        if progress:
+            utils.progress_bar(f, nF, start_time, prefix='Processing faces:', min_update_interval=1)
         for e in range(3):
             u,v = np.sort(edg[f,e,:])
             uv = (u,v)
             # In these well-behaved meshes, we know that each edge has
             # only two inciding faces (a proper manifold), hence if the entry
             # already exists, we can proceed to computing the angle
+            # +np.dot gives the angle between normals (we want this)
+            # -np.dot gives the dihedral angle proper
             if uv in da:
-                da[uv] = np.clip(-np.dot(facn[f], da[uv]), -1.0, 1.0)
+                da[uv] = np.clip(np.dot(facn[f], da[uv]), -1.0, 1.0)
                 da[uv] = np.arccos(da[uv])
             else:
                 da[uv] = facn[f]
@@ -648,12 +697,16 @@ def dihedral_angles(fac, facn):
     return danglesf
 
 # =============================================================================
-def calc_castellanosmith(vtx, fac, facn, vorv):
+def calc_castellanosmith(vtx, fac, facn, vorv, progress=False):
     '''
     Compute principal curvatures k1 and k2 following the algorithm
     proposed by Castellano Smith (1999).
     
     This will not return principal directions.
+    
+    Note that the original method worked on faces, thus interpolated both
+    Gauss and Germain curvatures to faces. Here, we do on vertices,
+    so that only Germain curvature needs to be interpolated.
 
     Parameters
     ----------
@@ -670,30 +723,36 @@ def calc_castellanosmith(vtx, fac, facn, vorv):
     -------
     curvs : dict with keys:
             k1, k2: NumPy vectors with principal curvatures.
-
     '''
     # Vertex coordinates per face
     tri   = vtx[fac]
     
     # Edge lengths and dihedral angles
     lengths, _ = calc_lengths(tri)
-    danglesf   = dihedral_angles(fac, facn)
-
+    danglesf   = calc_dihedral(fac, facn)
+    
     # Areas of the subtriangles defined by the incenter
-    icen  = calc_incenters(tri)
-    arear = calc_relative_area(vtx, fac, facn, icen)
+    incen   = calc_incenters(tri)
+    inarea  = calc_relative_area(vtx, fac, facn, incen)
+    eareasf = edge_areas(vtx, fac, inarea)
     
     # Germain curvature at each edge
-    He    = lengths * danglesf / arear
+    # He = danglesf * lengths /    eareasf  # original, assumes a rectangular area
+    He   = danglesf * lengths / (2*eareasf) # assumes a lozenge area around the edge
     
-    # Germain curvature at each vertex
-    H = np.zeros(vtx.shape[0])
-    np.add.at(H, fac[0], He[:,1])
-    np.add.at(H, fac[0], He[:,2])
-    np.add.at(H, fac[1], He[:,2])
-    np.add.at(H, fac[1], He[:,0])
-    np.add.at(H, fac[2], He[:,0])
-    np.add.at(H, fac[2], He[:,1])
+    # Accummulate Germain curvature at each vertex and counter
+    Hcum = np.zeros(vtx.shape[0])
+    Hcnt = np.zeros(vtx.shape[0])
+    np.add.at(Hcum, fac[:,0], He[:,1])
+    np.add.at(Hcum, fac[:,0], He[:,2])
+    np.add.at(Hcum, fac[:,1], He[:,2])
+    np.add.at(Hcum, fac[:,1], He[:,0])
+    np.add.at(Hcum, fac[:,2], He[:,0])
+    np.add.at(Hcum, fac[:,2], He[:,1])
+    np.add.at(Hcnt, fac[:,0], 2)
+    np.add.at(Hcnt, fac[:,1], 2)
+    np.add.at(Hcnt, fac[:,2], 2)
+    H = Hcum / Hcnt
     
     # Angles of each vertex of each face (anglesf) and sum of angles
     # at each vertex (anglesv)
